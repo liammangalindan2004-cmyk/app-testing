@@ -1,0 +1,30 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/login.unity
+    guid: 8c9cfa26abfee488c85f1582747f6a02
+  - enabled: 1
+    path: Assets/Scenes/definition.unity
+    guid: 57ecc2d723f8c794fbb02cda6a2fe0d7
+  - enabled: 1
+    path: Assets/Scenes/landing.unity
+    guid: a90d6ab07156a074eb6843519ed195f1
+  - enabled: 1
+    path: Assets/Scenes/KanjiWrite.unity
+    guid: 095954e7ca923b14a8a06f7ca4406ac9
+  - enabled: 1
+    path: Assets/Scenes/addClass.unity
+    guid: bfafc0f71859c934a840ada42f599e4a
+  - enabled: 1
+    path: Assets/Scenes/KanjiMultipleChoices.unity
+    guid: b5deddaa675c9b64a9e1e34d89385563
+  m_configObjects:
+    com.unity.addressableassets: {fileID: 11400000, guid: e5c6fedc82442ea4cbeedfeea77290c6, type: 2}
+    com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 2bcd2660ca9b64942af0de543d8d7100, type: 3}
+    com.unity.localization.settings: {fileID: 11400000, guid: 4e60bb194de973c43860bb3e1f95e3c3, type: 2}
+  m_UseUCBPForAssetBundles: 0

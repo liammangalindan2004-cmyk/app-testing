@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "37524840724",
+    "firebase_url": "https://unmeithesis-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "unmeithesis",
+    "storage_bucket": "unmeithesis.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:37524840724:android:1f731639b6035053156201",
+        "android_client_info": {
+          "package_name": "com.taqsnottax.unmei"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCQp92-ffRd0hndeRDnVEN9aMaGiWA1ZTY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
