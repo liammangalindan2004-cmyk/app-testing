@@ -51,6 +51,12 @@ using Firebase.Extensions;
 ///         quiz's srs/ and the writing practice's srsWriting/, kept in its
 ///         own node so the three skills don't overwrite each other's
 ///         mastery of the same character)
+///  • When the whole due queue has been attempted once, ONE summary record
+///    is appended to speakingSessionHistory/{userId}/{pushId} — correct /
+///    total kanji reviewed for that review, the same "one instance per
+///    review" shape as the reading quiz's readingHistory and the writing
+///    practice's writingSessionHistory. "Correct" means the attempt scored
+///    at or above Srs Pass Threshold.
 ///  • Set Jlpt Level / User Id under "Realtime Database Config" to the same
 ///    values used in the reading quiz and writing practice, so all three
 ///    modules feed the same student's grade record.
@@ -133,6 +139,7 @@ public class PronunciationSceneController : MonoBehaviour
     // Session-wide grading accumulators (persist across attempts while this scene is open)
     private int _sessionAttemptsCompleted = 0;
     private float _sessionScoreSum = 0f;
+    private int _sessionCorrectCount = 0;
 
     // Activity calendar bookkeeping
     private float _sessionStartRealtime;
@@ -342,6 +349,45 @@ public class PronunciationSceneController : MonoBehaviour
     }
 
     /// <summary>
+    /// Writes ONE record per completed review (the whole due queue attempted
+    /// once), so the portal can show "x / total kanji reviewed" for speaking —
+    /// the same "one instance per review" shape as the reading quiz's
+    /// readingHistory and the writing practice's writingSessionHistory.
+    /// "Correct" here means the attempt scored at or above srsPassThreshold.
+    /// </summary>
+    private void WriteSpeakingSessionHistory()
+    {
+        if (_dbRoot == null) return;
+
+        int total = _sessionQueue.Count;
+        if (total == 0) return;
+
+        int averagePercent = _sessionAttemptsCompleted > 0
+            ? Mathf.RoundToInt(_sessionScoreSum / _sessionAttemptsCompleted)
+            : 0;
+        long nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+        var sessionEntry = new Dictionary<string, object>
+        {
+            ["studentUid"] = userId,
+            ["jlptLevel"] = jlptLevel,
+            ["correct"] = _sessionCorrectCount,
+            ["total"] = total,
+            ["percent"] = averagePercent,
+            ["timestampUnix"] = nowUnix
+        };
+
+        DatabaseReference sessionRef = _dbRoot.Child("speakingSessionHistory").Child(userId).Push();
+        sessionRef.SetValueAsync(sessionEntry).ContinueWithOnMainThread(t =>
+        {
+            if (t.IsFaulted)
+                Debug.LogWarning("[Grade] speakingSessionHistory write failed: " + t.Exception?.Message);
+            else
+                Debug.Log($"[Grade] Speaking review saved: {_sessionCorrectCount}/{total} correct ({averagePercent}% avg).");
+        });
+    }
+
+    /// <summary>
     /// Manual override: call this from another script to force-show a
     /// specific character/reading for one attempt. This bypasses the SRS
     /// queue for that attempt only — the next auto-advance resumes the
@@ -473,6 +519,7 @@ public class PronunciationSceneController : MonoBehaviour
         _sessionIndex++;
         if (_sessionIndex >= _sessionQueue.Count)
         {
+            WriteSpeakingSessionHistory();
             ShowSessionCompleteMessage();
             return;
         }
@@ -523,6 +570,7 @@ public class PronunciationSceneController : MonoBehaviour
         //    grades/{jlptLevel}/{userId}/speaking.
         _sessionAttemptsCompleted++;
         _sessionScoreSum += percent;
+        if (correct) _sessionCorrectCount++;
         int sessionPercent = Mathf.RoundToInt(_sessionScoreSum / _sessionAttemptsCompleted);
 
         _dbRoot.Child("grades").Child(jlptLevel).Child(userId).Child("speaking")

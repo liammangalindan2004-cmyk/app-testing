@@ -35,9 +35,13 @@ using Firebase.Extensions;
 ///         SRS — kept in a SEPARATE node from the reading quiz's `srs/`
 ///         path so writing mastery and reading mastery of the same kanji
 ///         don't overwrite each other)
-///  • There's no explicit "quiz complete" screen here (this UI loops via
-///    Next/Prev), so the writing grade updates live after each character
-///    instead of once at the end of a session.
+///  • This UI loops via Next/Prev with no explicit "quiz complete" screen,
+///    so a "review" is defined as one full pass through every due character.
+///    When that pass finishes, ONE summary record is appended to
+///    writingSessionHistory/{userId}/{pushId} — correct / total kanji
+///    reviewed plus the average accuracy for that pass — the same
+///    "one instance per review" shape as the reading quiz's readingHistory.
+///    The tally then resets so the next pass becomes its own new instance.
 ///
 /// ═══════════════════════════════════════════════════════════
 ///  FULL SETUP GUIDE
@@ -77,6 +81,8 @@ using Firebase.Extensions;
 ///     kanji/{jlptLevel}/{character}            — read, if useFirebaseKanjiList
 ///     srsWriting/{userId}/{jlptLevel}/{char}   — write, SM-2 fields
 ///     writingHistory/{userId}/{pushId}         — write, one per completed char
+///     writingSessionHistory/{userId}/{pushId}  — write, one per full review pass
+///                                                 (fields: correct, total, percent)
 ///     grades/{jlptLevel}/{userId}/writing      — write, running session percent
 /// ═══════════════════════════════════════════════════════════
 /// </summary>
@@ -147,9 +153,12 @@ public class KanjiPracticeUI : MonoBehaviour
     private int _strokeScoreCount = 0;
     private int _wrongAttemptsForCurrent = 0;
 
-    // Session-wide grading accumulators (persist across Next/Prev while this scene is open)
+    // Session-wide grading accumulators (persist across Next/Prev while this scene is open,
+    // and reset every time a full pass through the due queue is completed — see
+    // WriteWritingSessionHistory / ResetSessionAccumulators)
     private int _sessionCharsCompleted = 0;
     private float _sessionQualitySum = 0f;
+    private int _sessionCorrectCount = 0;
 
     // Activity calendar bookkeeping
     private float _sessionStartRealtime;
@@ -450,6 +459,7 @@ public class KanjiPracticeUI : MonoBehaviour
         //    grades/{jlptLevel}/{userId}/writing — no "exit" step needed here.
         _sessionCharsCompleted++;
         _sessionQualitySum += quality;
+        if (correct) _sessionCorrectCount++;
         int sessionPercent = Mathf.RoundToInt(100f * _sessionQualitySum / _sessionCharsCompleted);
 
         _dbRoot.Child("grades").Child(jlptLevel).Child(userId).Child("writing")
@@ -473,6 +483,59 @@ public class KanjiPracticeUI : MonoBehaviour
 
         ActivityCalendarWriter.LogActivity(_dbRoot, userId, "writing",
             kanjiDelta: 1, minutesDelta: minutesDelta, countSession: _sessionCharsCompleted == 1);
+
+        // 5) Once every due character has been drawn once, this counts as one
+        //    completed review — write a single summary record (like the reading
+        //    quiz's readingHistory) and start a fresh tally for the next pass.
+        if (_chars != null && _chars.Length > 0 && _sessionCharsCompleted >= _chars.Length)
+        {
+            WriteWritingSessionHistory();
+            ResetSessionAccumulators();
+        }
+    }
+
+    /// <summary>
+    /// Writes ONE record per completed review (a full pass through every due
+    /// character), so the portal can show "x / total kanji reviewed" plus the
+    /// average accuracy for that review, the same way readingHistory does for
+    /// the reading quiz. Never overwritten — a new push key is used each time.
+    /// </summary>
+    private void WriteWritingSessionHistory()
+    {
+        if (_dbRoot == null) return;
+
+        int total = _sessionCharsCompleted;
+        if (total == 0) return;
+
+        int averagePercent = Mathf.RoundToInt(100f * _sessionQualitySum / total);
+        long nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+        var sessionEntry = new Dictionary<string, object>
+        {
+            ["studentUid"] = userId,
+            ["jlptLevel"] = jlptLevel,
+            ["correct"] = _sessionCorrectCount,
+            ["total"] = total,
+            ["percent"] = averagePercent,
+            ["timestampUnix"] = nowUnix
+        };
+
+        DatabaseReference sessionRef = _dbRoot.Child("writingSessionHistory").Child(userId).Push();
+        sessionRef.SetValueAsync(sessionEntry).ContinueWithOnMainThread(t =>
+        {
+            if (t.IsFaulted)
+                Debug.LogWarning("[Grade] writingSessionHistory write failed: " + t.Exception?.Message);
+            else
+                Debug.Log($"[Grade] Writing review saved: {_sessionCorrectCount}/{total} correct, {averagePercent}% avg.");
+        });
+    }
+
+    /// <summary>Starts a fresh tally for the next full pass through the due queue.</summary>
+    private void ResetSessionAccumulators()
+    {
+        _sessionCharsCompleted = 0;
+        _sessionQualitySum = 0f;
+        _sessionCorrectCount = 0;
     }
 
     private void UpdateSrsWriting(string character, bool correct)
