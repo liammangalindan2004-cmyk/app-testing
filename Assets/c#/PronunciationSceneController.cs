@@ -13,7 +13,8 @@ using Firebase.Extensions;
 
 /// <summary>
 /// Wires a "record and check pronunciation" scene together:
-/// - Tap mic button to start recording
+/// - Press and hold the mic button to record; release it to end recording
+///   and run recognition on whatever was captured
 /// - Waveform bars react to live mic input while recording
 /// - Result/score appears when Vosk finishes processing
 /// - Every scored attempt is graded to the same Realtime Database used by
@@ -74,6 +75,8 @@ public class PronunciationSceneController : MonoBehaviour
 
     [Header("UI - Mic Button")]
     public Button micButton;
+    [Tooltip("Attach a MicHoldButton component to the same GameObject as micButton — this is what actually detects press/release for the hold-to-talk gesture.")]
+    public MicHoldButton micHoldButton;
     public Image micIcon;
     public Color micIdleColor = new Color(0.42f, 0.24f, 0.58f); // purple, matches your circle
     public Color micRecordingColor = new Color(0.85f, 0.2f, 0.3f); // red while listening
@@ -149,7 +152,17 @@ public class PronunciationSceneController : MonoBehaviour
     {
         _sessionStartRealtime = Time.realtimeSinceStartup;
 
-        micButton.onClick.AddListener(OnMicButtonPressed);
+        if (micHoldButton != null)
+        {
+            micHoldButton.OnPressed.AddListener(OnMicButtonDown);
+            micHoldButton.OnReleased.AddListener(OnMicButtonUp);
+        }
+        else
+        {
+            Debug.LogError("[Pronunciation] micHoldButton is not assigned — add a MicHoldButton " +
+                            "component to the mic button's GameObject and drag it in, or the mic " +
+                            "button won't respond to press/hold at all.");
+        }
         checker.OnResult += HandleResult;
         checker.OnError += HandleError;
         ResetWaveform();
@@ -409,17 +422,25 @@ public class PronunciationSceneController : MonoBehaviour
         if (targetReadingText != null) targetReadingText.text = currentReadingKana;
     }
 
-    private void OnMicButtonPressed()
+    private void OnMicButtonDown()
     {
-        if (_isBusy) return;
+        if (_isBusy || !micButton.interactable) return;
         _isBusy = true;
 
         resultText.text = "Listening...";
         scoreText.text = "";
         if (micIcon != null) micIcon.color = micRecordingColor;
 
-        checker.StartCheck(currentReadingKana, currentLessonVocabKana);
+        checker.StartRecording(currentReadingKana, currentLessonVocabKana);
         StartCoroutine(AnimateWaveformWhileRecording());
+    }
+
+    private void OnMicButtonUp()
+    {
+        // Guards against a stray release with nothing actually in progress
+        // (e.g. the button was disabled between press and release).
+        if (!_isBusy) return;
+        checker.StopRecordingAndProcess();
     }
 
     /// <summary>
@@ -439,7 +460,7 @@ public class PronunciationSceneController : MonoBehaviour
         AudioClip clip = checker.CurrentClip;
         string micDevice = checker.CurrentMicDevice;
 
-        while (elapsed < checker.maxRecordSeconds && clip != null && micDevice != null)
+        while (elapsed < checker.maxRecordSeconds && clip != null && micDevice != null && checker.IsRecording)
         {
             int micPos = Microphone.GetPosition(micDevice) - sampleWindow;
             if (micPos > 0)
@@ -650,7 +671,11 @@ public class PronunciationSceneController : MonoBehaviour
     {
         _isBusy = false;
         if (micIcon != null) micIcon.color = micIdleColor;
-        resultText.text = $"Couldn't hear that — try again.";
+        // Show the checker's actual message — e.g. the "hold the mic button
+        // a little longer" hint for too-short presses reads very differently
+        // from a genuine "couldn't understand you" recognition failure, and
+        // collapsing both into one fixed string hid that distinction.
+        resultText.text = string.IsNullOrEmpty(message) ? "Couldn't hear that — try again." : message;
         Debug.LogWarning(message);
     }
 
@@ -660,6 +685,11 @@ public class PronunciationSceneController : MonoBehaviour
         {
             checker.OnResult -= HandleResult;
             checker.OnError -= HandleError;
+        }
+        if (micHoldButton != null)
+        {
+            micHoldButton.OnPressed.RemoveListener(OnMicButtonDown);
+            micHoldButton.OnReleased.RemoveListener(OnMicButtonUp);
         }
     }
 

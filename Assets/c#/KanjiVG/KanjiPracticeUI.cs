@@ -96,6 +96,10 @@ public class KanjiPracticeUI : MonoBehaviour
     public TMP_Text strokeProgressLabel;
     public TMP_Text scoreLabel;
     public TMP_Text feedbackLabel;
+    [Tooltip("Shows the kanji's meaning. Only populated when 'Use Firebase Kanji List' is on, since the local Practice List has no meaning data attached.")]
+    public TMP_Text meaningLabel;
+    [Tooltip("Shows the kanji's kun'yomi + on'yomi readings. Only populated when 'Use Firebase Kanji List' is on, for the same reason as meaningLabel.")]
+    public TMP_Text pronunciationLabel;
 
     [Header("── Practice List ──")]
     [Tooltip("Used only if 'Use Firebase Kanji List' is off, or as a fallback if the DB load fails/returns nothing.")]
@@ -147,6 +151,13 @@ public class KanjiPracticeUI : MonoBehaviour
 
     private DatabaseReference _dbRoot;
     private Dictionary<string, SrsRecord> _srsMap = new();
+
+    // Meaning/reading data per character, keyed by the character itself.
+    // Populated from the same kanji/{jlptLevel} snapshot LoadCharsFromFirebase
+    // already fetches — no extra database reads needed. Stays empty when
+    // useFirebaseKanjiList is off, since the local Practice List has no
+    // meaning/reading data attached to it.
+    private Dictionary<string, Dictionary<string, object>> _kanjiMeta = new();
 
     // Per-character grading accumulators (reset every time a new kanji loads)
     private float _strokeScoreSum = 0f;
@@ -237,6 +248,8 @@ public class KanjiPracticeUI : MonoBehaviour
         if (feedbackLabel != null) feedbackLabel.color = new Color(1f, 0.85f, 0.15f);
         SetScore("—");
         if (strokeProgressLabel != null) strokeProgressLabel.text = "";
+        if (meaningLabel != null) meaningLabel.text = "";
+        if (pronunciationLabel != null) pronunciationLabel.text = "";
     }
 
     // ── Character list loading ───────────────────────────────────────────────
@@ -247,6 +260,10 @@ public class KanjiPracticeUI : MonoBehaviour
         _chars = new string[practiceList.Length];
         for (int i = 0; i < practiceList.Length; i++)
             _chars[i] = practiceList[i].ToString();
+
+        // No database data available for the local list, so meaning/reading
+        // labels will show "—" for these characters — see LoadKanji().
+        _kanjiMeta.Clear();
     }
 
     private IEnumerator LoadCharsFromFirebase()
@@ -269,8 +286,13 @@ public class KanjiPracticeUI : MonoBehaviour
         }
 
         var characters = new List<string>();
+        _kanjiMeta.Clear();
         foreach (var child in kanjiSnap.Children)
+        {
             characters.Add(child.Key);
+            if (child.Value is Dictionary<string, object> meta)
+                _kanjiMeta[child.Key] = meta;
+        }
 
         if (characters.Count == 0)
         {
@@ -613,6 +635,117 @@ public class KanjiPracticeUI : MonoBehaviour
         SetFeedback("");
         if (feedbackLabel != null) feedbackLabel.color = Color.white;
         RefreshProgress();
+        RefreshMeaningAndPronunciation(k.ToString());
+    }
+
+    /// <summary>
+    /// Populates meaningLabel/pronunciationLabel from the same kanji/{jlptLevel}
+    /// data LoadCharsFromFirebase already fetched. Shows "—" when there's no
+    /// meta for this character (local Practice List mode, or a DB record with
+    /// no meaning/reading fields).
+    /// </summary>
+    private void RefreshMeaningAndPronunciation(string character)
+    {
+        if (meaningLabel == null && pronunciationLabel == null) return;
+
+        if (!_kanjiMeta.TryGetValue(character, out var data))
+        {
+            if (meaningLabel != null) meaningLabel.text = "—";
+            if (pronunciationLabel != null) pronunciationLabel.text = "—";
+            return;
+        }
+
+        if (meaningLabel != null)
+        {
+            string meanings = ReadFlexibleField(data, "meanings", "meaning") ?? "";
+            meaningLabel.text = string.IsNullOrEmpty(meanings) ? "No meaning" : meanings;
+        }
+
+        if (pronunciationLabel != null)
+        {
+            var readings = new List<string>();
+            readings.AddRange(ReadReadingList(data, "readings_kun"));
+            readings.AddRange(ReadReadingList(data, "readings_on"));
+
+            if (readings.Count == 0)
+            {
+                string plain = ReadFlexibleField(data, "reading") ?? "";
+                if (!string.IsNullOrEmpty(plain))
+                    readings.AddRange(plain.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0));
+            }
+
+            readings = readings.Distinct().ToList();
+            pronunciationLabel.text = readings.Count > 0 ? string.Join(", ", readings) : "No readings";
+        }
+    }
+
+    /// <summary>
+    /// Extracts a kanji's readings_kun / readings_on field as a cleaned list of
+    /// plain kana, e.g. "ひと.つ" → "ひとつ". Mirrors the helper in displayKanji.cs
+    /// so both scenes parse the same DB shape the same way.
+    /// </summary>
+    private List<string> ReadReadingList(Dictionary<string, object> data, string key)
+    {
+        var result = new List<string>();
+        if (!data.TryGetValue(key, out object raw) || raw == null) return result;
+
+        IEnumerable<string> rawItems = raw switch
+        {
+            List<object> list => list.Select(x => x?.ToString()),
+            Dictionary<string, object> map => Enumerable.Range(0, map.Count)
+                .Select(i => map.TryGetValue(i.ToString(), out object v) ? v?.ToString() : null),
+            _ => new[] { raw.ToString() }
+        };
+
+        foreach (var item in rawItems)
+        {
+            if (string.IsNullOrEmpty(item)) continue;
+            string cleaned = item.Trim('-', '!').Replace(".", "");
+            if (!string.IsNullOrEmpty(cleaned)) result.Add(cleaned);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Reads the first present key from a Realtime Database record, flattening
+    /// arrays/maps into a comma-joined string. Mirrors the helper in
+    /// displayKanji.cs so both scenes parse the same DB shape the same way.
+    /// </summary>
+    private string ReadFlexibleField(Dictionary<string, object> data, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!data.ContainsKey(key) || data[key] == null) continue;
+            object raw = data[key];
+
+            if (raw is List<object> list)
+            {
+                var parts = new List<string>();
+                foreach (var item in list)
+                    if (item != null) parts.Add(item.ToString());
+                string joined = string.Join(", ", parts);
+                if (!string.IsNullOrEmpty(joined)) return joined;
+                continue;
+            }
+
+            if (raw is Dictionary<string, object> map)
+            {
+                var parts = new List<string>();
+                for (int i = 0; i < map.Count; i++)
+                {
+                    string k2 = i.ToString();
+                    if (map.ContainsKey(k2) && map[k2] != null)
+                        parts.Add(map[k2].ToString());
+                }
+                string joinedMap = string.Join(", ", parts);
+                if (!string.IsNullOrEmpty(joinedMap)) return joinedMap;
+                continue;
+            }
+
+            string s = raw.ToString();
+            if (!string.IsNullOrEmpty(s)) return s;
+        }
+        return null;
     }
 
     private void RefreshProgress()
