@@ -1478,9 +1478,10 @@ MonoBehaviour:
   defaultColor: {r: 1, g: 1, b: 1, a: 1}
   correctColor: {r: 0.18, g: 0.72, b: 0.42, a: 1}
   wrongColor: {r: 0.85, g: 0.22, b: 0.22, a: 1}
+  highlightColor: {r: 0.9, g: 0.15, b: 0.15, a: 1}
   databaseUrl: https://unmei-nihongo-center-default-rtdb.asia-southeast1.firebasedatabase.app/
   jlptLevel: jlpt_n5
-  userId: user001
+  debugUserIdOverride: student_001
   ngrokUrl: https://nondynastic-nonritualistically-carlie.ngrok-free.dev
   modelName: qwen/qwen3-4b-2507
   aiTimeout: 8
@@ -1919,7 +1920,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -415, y: -796}
+  m_AnchoredPosition: {x: -1354, y: -230}
   m_SizeDelta: {x: 200, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &1759256148
@@ -2056,7 +2057,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 368.90002, y: -796}
+  m_AnchoredPosition: {x: -1354, y: -280}
   m_SizeDelta: {x: 200, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &1793408632
@@ -2495,8 +2496,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 348.9, y: -663}
-  m_SizeDelta: {x: 160, y: 30}
+  m_AnchoredPosition: {x: -1374, y: -342.66}
+  m_SizeDelta: {x: 160, y: 75.3148}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!1 &1963531233
 GameObject:

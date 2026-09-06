@@ -285,12 +285,43 @@ public class KanjiDisplayWithMeaning : MonoBehaviour
         if (kanjiGraphic == null) return;
 
         isAnimating = false;
+
+        // Use async loading for Android compatibility
+        #if UNITY_ANDROID || UNITY_EDITOR
+        StartCoroutine(LoadSvgGraphicAsync(kanji));
+        #else
         KanjiData kd = KanjiLoader.Load(kanji);
         if (kd != null)
         {
             // ghostIndex: -1 = show all strokes fully, no ghost hint
             kanjiGraphic.LoadKanji(kd, ghostIndex: -1);
             Debug.Log($"[Kanji] Graphic loaded for '{kanji}'");
+        }
+        else
+        {
+            Debug.LogWarning($"[Kanji] No SVG for '{kanji}' — check StreamingAssets/kanji/");
+        }
+        #endif
+    }
+
+    private IEnumerator LoadSvgGraphicAsync(char kanji)
+    {
+        KanjiData kd = null;
+        bool loadComplete = false;
+
+        yield return KanjiLoader.LoadAsync(kanji, (data) =>
+        {
+            kd = data;
+            loadComplete = true;
+        });
+
+        yield return new WaitUntil(() => loadComplete);
+
+        if (kd != null)
+        {
+            // ghostIndex: -1 = show all strokes fully, no ghost hint
+            kanjiGraphic.LoadKanji(kd, ghostIndex: -1);
+            Debug.Log($"[Kanji] Graphic loaded for '{kanji}' with {kd.strokeCount} strokes");
         }
         else
         {
@@ -326,7 +357,18 @@ public class KanjiDisplayWithMeaning : MonoBehaviour
     /// </summary>
     private IEnumerator WaitForAnimationThenRestore()
     {
-        KanjiData kd = KanjiLoader.Load(currentKanjiChar);
+        KanjiData kd = null;
+        bool loadComplete = false;
+
+        // Use async loading for Android compatibility
+        yield return KanjiLoader.LoadAsync(currentKanjiChar, (data) =>
+        {
+            kd = data;
+            loadComplete = true;
+        });
+
+        yield return new WaitUntil(() => loadComplete);
+
         if (kd == null) yield break;
 
         float totalDuration = kd.strokeCount *

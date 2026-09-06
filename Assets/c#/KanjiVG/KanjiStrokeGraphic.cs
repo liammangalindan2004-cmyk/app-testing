@@ -93,6 +93,15 @@ public class KanjiStrokeGraphic : MaskableGraphic
         _hasLive = false;
         StopAnim();
         SetVerticesDirty();
+
+        if (data != null)
+        {
+            Debug.Log($"[KanjiStrokeGraphic] Loaded kanji with {data.strokeCount} strokes, ghost index: {ghostIndex}");
+        }
+        else
+        {
+            Debug.LogError("[KanjiStrokeGraphic] Attempted to load null KanjiData!");
+        }
     }
 
     /// <summary>Show the ghost hint on a specific stroke (0-based). -1 = hide.</summary>
@@ -100,6 +109,7 @@ public class KanjiStrokeGraphic : MaskableGraphic
     {
         _ghostStrokeIndex = strokeIndex;
         SetVerticesDirty();
+        Debug.Log($"[KanjiStrokeGraphic] Ghost stroke set to index: {strokeIndex}");
     }
 
     /// <summary>Update the live drawing trail while the player drags.</summary>
@@ -192,6 +202,8 @@ public class KanjiStrokeGraphic : MaskableGraphic
                 DrawStrokeArrow(vh, pts, ghostColor, arrowLength * 1.3f, arrowWidth * 1.3f);
             if (startDotRadius > 0f)
                 DrawCircle(vh, pts[0], startDotRadius * 1.3f, ghostColor);
+
+            Debug.Log($"[KanjiStrokeGraphic] Drawing ghost stroke at index {_ghostStrokeIndex}");
         }
 
         // 3. Animation strokes

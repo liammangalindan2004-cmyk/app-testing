@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 namespace JapaneseLearning.Dashboard
@@ -35,9 +36,10 @@ namespace JapaneseLearning.Dashboard
         [SerializeField] private bool autoAssignBlankDateKeys = true;
 
         [Header("Progress formula")]
-        [Tooltip("minutesStudied on a day is divided by this to get 0-1 progress for that circle. " +
-                 "Reaching or exceeding this fills the circle completely.")]
-        [SerializeField] private float dailyGoalMinutes = 20f;
+        [Tooltip("The set of quiz types that make up a full day. Each one present in " +
+                 "a day's skillsPracticed list contributes an equal share toward 100% " +
+                 "(e.g. 3 quizzes -> 33% each, all 3 done -> 100%).")]
+        [SerializeField] private string[] quizTypesForDailyGoal = { "reading", "writing", "speaking" };
 
         private FirebaseActivityCalendarProvider provider;
 
@@ -87,10 +89,33 @@ namespace JapaneseLearning.Dashboard
 
                 float progress = 0f;
                 if (calendar.TryGetValue(circle.dateKey, out var day))
-                    progress = Mathf.Clamp01(day.minutesStudied / dailyGoalMinutes);
+                    progress = ComputeDailyProgress(day);
 
                 circle.SetProgress(progress);
             }
+        }
+
+        /// <summary>
+        /// Splits 100% evenly across quizTypesForDailyGoal (reading/writing/speaking
+        /// by default, so each completed quiz = 33%). A quiz counts as "done" for
+        /// the day if its name appears in that day's skillsPracticed list, which
+        /// ActivityCalendarWriter.LogActivity already populates whenever a reading
+        /// quiz, writing review, or speaking review is completed.
+        /// </summary>
+        private float ComputeDailyProgress(DayActivity day)
+        {
+            if (quizTypesForDailyGoal == null || quizTypesForDailyGoal.Length == 0) return 0f;
+            if (day?.skillsPracticed == null) return 0f;
+
+            int completed = 0;
+            foreach (var quizType in quizTypesForDailyGoal)
+            {
+                if (!string.IsNullOrEmpty(quizType) &&
+                    day.skillsPracticed.Contains(quizType, StringComparer.OrdinalIgnoreCase))
+                    completed++;
+            }
+
+            return Mathf.Clamp01((float)completed / quizTypesForDailyGoal.Length);
         }
     }
 }

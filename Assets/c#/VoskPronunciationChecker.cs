@@ -28,6 +28,8 @@ namespace JapaneseLearning.Pronunciation
         [Header("Recording")]
         public int sampleRate = 16000;
         public int maxRecordSeconds = 4;
+        [Tooltip("If the mic button is released before this many seconds have been recorded, treat it as too short to recognize instead of running Vosk on near-silence.")]
+        public float minRecordSeconds = 0.3f;
 
         public event Action<PronunciationResult> OnResult;
         public event Action<string> OnError;
@@ -38,11 +40,16 @@ namespace JapaneseLearning.Pronunciation
         /// <summary>Exposes the mic device name currently in use.</summary>
         public string CurrentMicDevice => _micDevice;
 
+        /// <summary>True while a press-and-hold recording is in progress.</summary>
+        public bool IsRecording => _isRecording;
+
         private Model _model;
         private VoskRecognizer _recognizer;
         private AudioClip _clip;
         private string _micDevice;
         private bool _isRecording;
+        private string _pendingExpectedReadingKana;
+        private Coroutine _autoStopCoroutine;
 
         void Awake()
         {
@@ -63,7 +70,83 @@ namespace JapaneseLearning.Pronunciation
         }
 
         /// <summary>
-        /// Starts a 1-shot pronunciation check.
+        /// Starts recording immediately, with no fixed duration — call
+        /// StopRecordingAndProcess() (e.g. on mic-button release) to end it and
+        /// run recognition on whatever was captured. This is what makes a
+        /// press-and-hold mic button possible, instead of always recording a
+        /// fixed window regardless of when the player actually spoke.
+        /// Recording still auto-stops after maxRecordSeconds as a safety net,
+        /// in case release never fires (e.g. the app loses focus mid-press).
+        /// </summary>
+        /// <param name="expectedReadingKana">
+        /// The target reading in hiragana/katakana, e.g. "がくせい".
+        /// </param>
+        /// <param name="lessonVocabularyKana">
+        /// Other kana readings from the current lesson. Constraining Vosk to
+        /// this small vocabulary (a "grammar") avoids kanji-guessing errors
+        /// and greatly improves accuracy vs. open-vocabulary recognition.
+        /// </param>
+        public void StartRecording(string expectedReadingKana, List<string> lessonVocabularyKana)
+        {
+            if (_isRecording)
+            {
+                OnError?.Invoke("Already recording.");
+                return;
+            }
+            if (_model == null || _micDevice == null)
+            {
+                OnError?.Invoke("Vosk model or microphone not initialized.");
+                return;
+            }
+
+            var vocab = new List<string>(lessonVocabularyKana ?? new List<string>());
+            if (!vocab.Contains(expectedReadingKana))
+                vocab.Add(expectedReadingKana);
+
+            string grammarJson = "[\"" + string.Join("\",\"", vocab) + "\", \"[unk]\"]";
+
+            _recognizer = new VoskRecognizer(_model, sampleRate, grammarJson);
+            _recognizer.SetWords(true); // ask Vosk to include per-word confidence
+
+            _pendingExpectedReadingKana = expectedReadingKana;
+            _clip = Microphone.Start(_micDevice, false, maxRecordSeconds, sampleRate);
+            _isRecording = true;
+
+            StartCoroutine(LogClipInfoNextFrame());
+            _autoStopCoroutine = StartCoroutine(AutoStopAfterMaxDuration());
+        }
+
+        private IEnumerator AutoStopAfterMaxDuration()
+        {
+            yield return new WaitForSeconds(maxRecordSeconds);
+            _autoStopCoroutine = null;
+            if (_isRecording) FinishRecordingAndProcess();
+        }
+
+        /// <summary>
+        /// Ends the current recording early (e.g. on mic-button release) and
+        /// runs recognition on whatever audio was captured so far. Safe to
+        /// call when nothing is recording — does nothing in that case.
+        /// </summary>
+        public void StopRecordingAndProcess()
+        {
+            if (!_isRecording) return;
+
+            if (_autoStopCoroutine != null)
+            {
+                StopCoroutine(_autoStopCoroutine);
+                _autoStopCoroutine = null;
+            }
+
+            FinishRecordingAndProcess();
+        }
+
+        /// <summary>
+        /// Starts a 1-shot pronunciation check that always records for the
+        /// full maxRecordSeconds window before processing. Kept for the
+        /// tap-to-record example UI (PronunciationCheckExampleUI) — prefer
+        /// StartRecording()/StopRecordingAndProcess() for a press-and-hold
+        /// mic button.
         /// </summary>
         /// <param name="expectedReadingKana">
         /// The target reading in hiragana/katakana, e.g. "がくせい".
@@ -95,11 +178,18 @@ namespace JapaneseLearning.Pronunciation
             _recognizer = new VoskRecognizer(_model, sampleRate, grammarJson);
             _recognizer.SetWords(true); // ask Vosk to include per-word confidence
 
+            _pendingExpectedReadingKana = expectedReadingKana;
             _clip = Microphone.Start(_micDevice, false, maxRecordSeconds, sampleRate);
             _isRecording = true;
 
             StartCoroutine(LogClipInfoNextFrame());
-            StartCoroutine(RecordAndProcess(expectedReadingKana));
+            StartCoroutine(WaitFullDurationThenFinish());
+        }
+
+        private IEnumerator WaitFullDurationThenFinish()
+        {
+            yield return new WaitForSeconds(maxRecordSeconds);
+            if (_isRecording) FinishRecordingAndProcess();
         }
 
         /// <summary>
@@ -172,9 +262,15 @@ namespace JapaneseLearning.Pronunciation
             return result;
         }
 
-        private IEnumerator RecordAndProcess(string expectedReadingKana)
+        /// <summary>
+        /// Stops the mic and runs Vosk recognition on whatever was captured.
+        /// Shared by both StopRecordingAndProcess() (press-and-hold) and the
+        /// auto-stop timers in StartRecording()/StartCheck() (safety cap /
+        /// tap-to-record).
+        /// </summary>
+        private void FinishRecordingAndProcess()
         {
-            yield return new WaitForSeconds(maxRecordSeconds);
+            string expectedReadingKana = _pendingExpectedReadingKana;
 
             int micPos = Microphone.GetPosition(_micDevice);
             Microphone.End(_micDevice);
@@ -183,7 +279,19 @@ namespace JapaneseLearning.Pronunciation
             if (micPos <= 0)
             {
                 OnError?.Invoke("No audio captured.");
-                yield break;
+                return;
+            }
+
+            // If the button was released almost immediately, there isn't
+            // enough audio for Vosk to work with — that's a "hold it a bit
+            // longer" situation, not a "couldn't understand you" one, so
+            // give a distinct, more useful message instead of running
+            // recognition on near-silence and getting a generic failure.
+            float recordedSeconds = micPos / (float)_clip.frequency;
+            if (recordedSeconds < minRecordSeconds)
+            {
+                OnError?.Invoke("Hold the mic button a little longer while you speak.");
+                return;
             }
 
             float[] samples = new float[micPos * _clip.channels];
@@ -225,7 +333,7 @@ namespace JapaneseLearning.Pronunciation
             catch (Exception e)
             {
                 OnError?.Invoke($"Failed to parse Vosk result: {e.Message}");
-                yield break;
+                return;
             }
 
             OnResult?.Invoke(evaluation);

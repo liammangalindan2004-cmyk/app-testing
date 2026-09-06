@@ -473,7 +473,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -251.74863, y: 221.18066}
+  m_AnchoredPosition: {x: 16, y: 250}
   m_SizeDelta: {x: 466.5027, y: 217.6387}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!222 &512812952
@@ -538,7 +538,7 @@ MonoBehaviour:
   m_fontSizeMin: 18
   m_fontSizeMax: 72
   m_fontStyle: 0
-  m_HorizontalAlignment: 1
+  m_HorizontalAlignment: 2
   m_VerticalAlignment: 256
   m_textAlignment: 65535
   m_characterSpacing: 0
@@ -873,7 +873,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -308, y: -165}
+  m_AnchoredPosition: {x: 293, y: 0}
   m_SizeDelta: {x: 322.5052, y: 187.5498}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1168340232
@@ -1503,7 +1503,7 @@ MonoBehaviour:
   sceneController: {fileID: 1587342826}
   meaningText: {fileID: 512812953}
   nextButton: {fileID: 1687793027}
-  module: 1
+  module: 2
   lessonItems: []
 --- !u!114 &1587342826
 MonoBehaviour:
@@ -1529,12 +1529,18 @@ MonoBehaviour:
   waveformMaxHeight: 60
   resultText: {fileID: 1168340232}
   scoreText: {fileID: 2087269369}
+  progressText: {fileID: 0}
   currentCharacter: "\u5B66\u751F"
   currentReadingKana: "\u304C\u304F\u305B\u3044"
   currentLessonVocabKana:
   - "\u304C\u304F\u305B\u3044"
   - "\u305B\u3093\u305B\u3044"
   - "\u304C\u3063\u3053\u3046"
+  autoAdvanceDelay: 2
+  databaseUrl: https://unmei-nihongo-center-default-rtdb.asia-southeast1.firebasedatabase.app/
+  jlptLevel: jlpt_n5
+  debugUserIdOverride: student_001
+  srsPassThreshold: 70
 --- !u!114 &1587342827
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1683,7 +1689,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 409.49, y: 103}
+  m_AnchoredPosition: {x: 1839, y: 22.895}
   m_SizeDelta: {x: 261.0133, y: 141.759}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!1 &2087269367

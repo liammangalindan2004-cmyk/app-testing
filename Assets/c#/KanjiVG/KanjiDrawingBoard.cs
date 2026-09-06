@@ -1,10 +1,9 @@
-﻿using System.Collections.Generic;
+﻿using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.EventSystems;
-using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.EnhancedTouch;
-using Touch = UnityEngine.InputSystem.EnhancedTouch.Touch;
+using UnityEngine.UI;
 
 /// <summary>
 /// Handles mouse/touch input entirely in UI space.
@@ -16,6 +15,9 @@ using Touch = UnityEngine.InputSystem.EnhancedTouch.Touch;
 ///   Same GameObject as KanjiStrokeGraphic (the "KanjiDrawArea" object).
 ///   Assign strokeGraphic in Inspector (or it will find it on the same object).
 ///   Assign the KanjiData via SetTarget().
+///   This GameObject must be a UI element under a Canvas (i.e. it needs a
+///   RectTransform) — Awake() below adds an Image component to it for
+///   raycasting, and that only works on a proper UI GameObject.
 /// </summary>
 [RequireComponent(typeof(KanjiStrokeGraphic))]
 public class KanjiDrawingBoard : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IDragHandler
@@ -44,10 +46,49 @@ public class KanjiDrawingBoard : MonoBehaviour, IPointerDownHandler, IPointerUpH
     private void Awake()
     {
         _graphic = GetComponent<KanjiStrokeGraphic>();
-        EnhancedTouchSupport.Enable();
-    }
+        if (_graphic == null)
+        {
+            // [RequireComponent] should have auto-added this — seeing this log
+            // means something unusual is going on with this specific GameObject
+            // (e.g. it's not the "KanjiDrawArea" object you set up, or the
+            // component was removed at runtime by other code).
+            Debug.LogError("[KanjiDrawingBoard] No KanjiStrokeGraphic found on this GameObject — " +
+                            "drawing and scoring will not work until this is fixed.");
+        }
 
-    private void OnDestroy() => EnhancedTouchSupport.Disable();
+        // Ensure this GameObject has an Image component so the UI EventSystem
+        // can actually raycast-hit it for touch/mouse input.
+        var image = GetComponent<Image>();
+        if (image == null)
+        {
+            image = gameObject.AddComponent<Image>();
+
+            if (image == null)
+            {
+                // AddComponent<Image> should not return null on a normal UI
+                // GameObject. Seeing this means this GameObject most likely
+                // isn't parented under a Canvas / doesn't have a RectTransform
+                // set up the way a UI element needs. Rather than crash Awake()
+                // (which used to happen here with a NullReferenceException and
+                // silently broke drawing input on device), we log a clear
+                // instruction instead: add an Image component to this
+                // GameObject manually in the Editor (nearly-transparent color,
+                // Raycast Target ON) as the class header's SETUP section
+                // originally described, then re-run.
+                Debug.LogError("[KanjiDrawingBoard] Could not add an Image component to this " +
+                                "GameObject automatically. Add one manually in the Editor instead: " +
+                                "set its color alpha to ~0.01 (invisible but still raycastable) and " +
+                                "make sure 'Raycast Target' is checked. Also confirm this GameObject " +
+                                "sits under a Canvas and has a RectTransform.");
+                return;
+            }
+
+            image.color = new Color(1f, 1f, 1f, 0.01f); // Nearly transparent
+        }
+        image.raycastTarget = true;
+
+        Debug.Log("[KanjiDrawingBoard] Initialized with raycast target enabled");
+    }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -55,14 +96,41 @@ public class KanjiDrawingBoard : MonoBehaviour, IPointerDownHandler, IPointerUpH
     {
         _target = data;
         _strokeIdx = 0;
-        _graphic.LoadKanji(data, ghostIndex: 0);
+        if (data != null)
+        {
+            _graphic.LoadKanji(data, ghostIndex: 0);
+            Debug.Log($"[DrawingBoard] Set target kanji '{data.character}' with {data.strokeCount} strokes");
+        }
+        else
+        {
+            Debug.LogError("[DrawingBoard] Attempted to set null KanjiData");
+        }
     }
 
     public void SetTarget(char kanji)
     {
-        var d = KanjiLoader.Load(kanji);
-        if (d != null) SetTarget(d);
-        else Debug.LogWarning($"[DrawingBoard] No data for '{kanji}'");
+        // Always load asynchronously via UnityWebRequest — this is required on
+        // Android/emulator (StreamingAssets can't be read with plain File I/O
+        // there) and works identically in the Editor, so there's no reason to
+        // branch by platform here.
+        StartCoroutine(LoadKanjiAsync(kanji));
+    }
+
+    private IEnumerator LoadKanjiAsync(char kanji)
+    {
+        Debug.Log($"[DrawingBoard] Starting async load for kanji '{kanji}'");
+        yield return KanjiLoader.LoadAsync(kanji, (data) =>
+        {
+            if (data != null)
+            {
+                SetTarget(data);
+                Debug.Log($"[DrawingBoard] Successfully loaded kanji '{kanji}' with {data.strokeCount} strokes");
+            }
+            else
+            {
+                Debug.LogWarning($"[DrawingBoard] Failed to load kanji '{kanji}'");
+            }
+        });
     }
 
     public void ResetBoard()
@@ -85,6 +153,7 @@ public class KanjiDrawingBoard : MonoBehaviour, IPointerDownHandler, IPointerUpH
         _livePts.Clear();
         _livePts.Add(LocalPoint(e));
         _graphic.SetLiveTrail(_livePts);
+        Debug.Log($"[KanjiDrawingBoard] OnPointerDown at {LocalPoint(e)}");
     }
 
     public void OnDrag(PointerEventData e)
@@ -94,6 +163,7 @@ public class KanjiDrawingBoard : MonoBehaviour, IPointerDownHandler, IPointerUpH
         if (_livePts.Count > 0 && Vector2.Distance(pt, _livePts[_livePts.Count - 1]) < 2f) return;
         _livePts.Add(pt);
         _graphic.SetLiveTrail(_livePts);
+        Debug.Log($"[KanjiDrawingBoard] OnDrag at {pt}, total points: {_livePts.Count}");
     }
 
     public void OnPointerUp(PointerEventData e)
@@ -101,9 +171,12 @@ public class KanjiDrawingBoard : MonoBehaviour, IPointerDownHandler, IPointerUpH
         if (!_drawing || _target == null) return;
         _drawing = false;
 
+        Debug.Log($"[KanjiDrawingBoard] OnPointerUp, collected {_livePts.Count} points");
+
         // Need at least a short stroke
         if (_livePts.Count < 5)
         {
+            Debug.Log($"[KanjiDrawingBoard] Stroke too short ({_livePts.Count} points), ignoring");
             _graphic.ClearLiveTrail();
             _livePts.Clear();
             return;
@@ -209,7 +282,7 @@ public class KanjiDrawingBoard : MonoBehaviour, IPointerDownHandler, IPointerUpH
         return local;
     }
 
-    private System.Collections.IEnumerator RemoveLastTrailAfter(float delay)
+    private IEnumerator RemoveLastTrailAfter(float delay)
     {
         yield return new WaitForSeconds(delay);
         // Remove the last completed trail (the wrong one)

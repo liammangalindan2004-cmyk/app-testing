@@ -1146,7 +1146,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: 0}
+  m_AnchoredPosition: {x: 325.60986, y: 0}
   m_SizeDelta: {x: 322.5052, y: 187.5498}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1168340232
@@ -1400,6 +1400,7 @@ GameObject:
   - component: {fileID: 1275106598}
   - component: {fileID: 1275106597}
   - component: {fileID: 1275106596}
+  - component: {fileID: 1275106599}
   m_Layer: 5
   m_Name: mic
   m_TagString: Untagged
@@ -1509,6 +1510,24 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1275106594}
   m_CullTransparentMesh: 1
+--- !u!114 &1275106599
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1275106594}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: feffbf11f14c2cd438be642c137b3d93, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::MicHoldButton
+  OnPressed:
+    m_PersistentCalls:
+      m_Calls: []
+  OnReleased:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!1 &1429562437
 GameObject:
   m_ObjectHideFlags: 0
@@ -1839,6 +1858,7 @@ MonoBehaviour:
   targetCharacterText: {fileID: 315998947}
   targetReadingText: {fileID: 465645379}
   micButton: {fileID: 1275106596}
+  micHoldButton: {fileID: 1275106599}
   micIcon: {fileID: 0}
   micIdleColor: {r: 0.42, g: 0.24, b: 0.58, a: 1}
   micRecordingColor: {r: 0.85, g: 0.2, b: 0.3, a: 1}
@@ -1847,12 +1867,18 @@ MonoBehaviour:
   waveformMaxHeight: 60
   resultText: {fileID: 1168340232}
   scoreText: {fileID: 2087269369}
+  progressText: {fileID: 0}
   currentCharacter: "\u5B66\u751F"
   currentReadingKana: "\u304C\u304F\u305B\u3044"
   currentLessonVocabKana:
   - "\u304C\u304F\u305B\u3044"
   - "\u305B\u3093\u305B\u3044"
   - "\u304C\u3063\u3053\u3046"
+  autoAdvanceDelay: 2
+  databaseUrl: https://unmei-nihongo-center-default-rtdb.asia-southeast1.firebasedatabase.app/
+  jlptLevel: jlpt_n5
+  debugUserIdOverride: student_001
+  srsPassThreshold: 70
 --- !u!114 &1587342827
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1868,6 +1894,7 @@ MonoBehaviour:
   modelFolderName: vosk-model-small-ja-0.22
   sampleRate: 48000
   maxRecordSeconds: 4
+  minRecordSeconds: 0.3
 --- !u!4 &1587342828
 Transform:
   m_ObjectHideFlags: 0
@@ -2001,7 +2028,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 382, y: 22.895}
+  m_AnchoredPosition: {x: 1731, y: 276}
   m_SizeDelta: {x: 261.0133, y: 141.759}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!1 &1886743648
