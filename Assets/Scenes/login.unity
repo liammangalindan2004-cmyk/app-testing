@@ -235,9 +235,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: '
-
-'
+  m_text: 
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
@@ -246,8 +244,8 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4294967295
-  m_fontColor: {r: 1, g: 1, b: 1, a: 1}
+    rgba: 4278190080
+  m_fontColor: {r: 0, g: 0, b: 0, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -333,8 +331,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0, y: -836}
-  m_SizeDelta: {x: 1080, y: 50}
+  m_AnchoredPosition: {x: -0.00000047684, y: -486}
+  m_SizeDelta: {x: 760.4824, y: 50}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!1 &269767902
 GameObject:
@@ -587,8 +585,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -133, y: -26.926}
-  m_SizeDelta: {x: -161.548, y: -53.8529}
+  m_AnchoredPosition: {x: 0, y: 20}
+  m_SizeDelta: {x: -315.2674, y: -75.8129}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &406796264
 MonoBehaviour:
@@ -989,7 +987,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0cd44c1031e13a943bb63640046fad76, type: 3}
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.CanvasScaler
-  m_UiScaleMode: 0
+  m_UiScaleMode: 1
   m_ReferencePixelsPerUnit: 100
   m_ScaleFactor: 1
   m_ReferenceResolution: {x: 800, y: 600}
@@ -1055,7 +1053,7 @@ MonoBehaviour:
   emailInput: {fileID: 619781351}
   passwordInput: {fileID: 958442080}
   statusText: {fileID: 110346172}
-  databaseUrl: https://unmei-realtime-database-default-rtdb.asia-southeast1.firebasedatabase.app/
+  databaseUrl: https://unmei-nihongo-center-default-rtdb.asia-southeast1.firebasedatabase.app/
   studentLandingScene: landing
   adminDashboardScene: admin_dashboard
 --- !u!4 &849427008
@@ -1286,8 +1284,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: -0.000014305, y: -687.83}
-  m_SizeDelta: {x: 794.8475, y: 118.3776}
+  m_AnchoredPosition: {x: 0.000007391, y: -398}
+  m_SizeDelta: {x: 581.836, y: 87.6338}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &979819875
 MonoBehaviour:
@@ -1792,8 +1790,8 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -182, y: -82}
-  m_SizeDelta: {x: -228.9957, y: -54.888}
+  m_AnchoredPosition: {x: -4.6059, y: 55.608}
+  m_SizeDelta: {x: -332.2074, y: -63.6719}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1743226004
 MonoBehaviour:

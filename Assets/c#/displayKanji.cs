@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
@@ -243,31 +244,23 @@ public class KanjiDisplayWithMeaning : MonoBehaviour
         meaningTMP.text = string.IsNullOrEmpty(meanings) ? "No meaning" : meanings;
 
         // ── Readings ─────────────────────────────────────────────────────────
-        string reading = ReadFlexibleField(data, "reading", "readings_kun", "readings_on") ?? "";
+        // Combine kun'yomi + on'yomi into one list (instead of only showing
+        // whichever field happens to exist first) so there are usually at
+        // least a few readings shown, not just one or two.
+        var readings = new List<string>();
+        readings.AddRange(ReadReadingList(data, "readings_kun"));
+        readings.AddRange(ReadReadingList(data, "readings_on"));
 
-        if (string.IsNullOrEmpty(reading))
+        // Fallback for older records that only have a plain "reading" field.
+        if (readings.Count == 0)
         {
-            // Fallback: try separate kun/on fields
-            string kun = ReadFlexibleField(data, "readings_kun") ?? "";
-            string on = ReadFlexibleField(data, "readings_on") ?? "";
-
-            if (!string.IsNullOrEmpty(kun) && !string.IsNullOrEmpty(on))
-                reading = $"kun: {kun}  |  on: {on}";
-            else if (!string.IsNullOrEmpty(kun))
-                reading = kun;
-            else if (!string.IsNullOrEmpty(on))
-                reading = on;
+            string plain = ReadFlexibleField(data, "reading") ?? "";
+            if (!string.IsNullOrEmpty(plain))
+                readings.AddRange(plain.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0));
         }
 
-        pronuncTMP.text = string.IsNullOrEmpty(reading) ? "No readings" : reading;
-
-        // ── JLPT (optional — show in meaning label if present) ───────────────
-        string jlpt = ReadFlexibleField(data, "jlpt", "jlpt_new", "jlpt_old") ?? "";
-        if (!string.IsNullOrEmpty(jlpt) && jlpt != "N")
-        {
-            // Append to meaning so the user can see it without needing an extra label
-            meaningTMP.text += $"\nJLPT: {jlpt}";
-        }
+        readings = readings.Distinct().ToList();
+        pronuncTMP.text = readings.Count > 0 ? string.Join(", ", readings) : "No readings";
 
         Debug.Log($"[Kanji] {character} → {kanjiStr} | {meaningTMP.text} | {pronuncTMP.text}");
 
@@ -351,26 +344,43 @@ public class KanjiDisplayWithMeaning : MonoBehaviour
     }
 
     /// <summary>
-    /// Adds a PointerClick EventTrigger to the graphic at runtime.
-    /// Also ensures there is a raycast-target Image so clicks register.
+    /// Adds a PointerClick EventTrigger to both the graphic and the kanji
+    /// character label, so clicking either one plays the stroke animation.
+    /// Also ensures each target has a raycast-target so clicks register.
     /// </summary>
     void SetupGraphicClickHandler()
     {
-        if (kanjiGraphic == null) return;
+        if (kanjiGraphic != null)
+            WireClickToAnimate(kanjiGraphic.gameObject, ensureImage: true);
 
-        // Ensure a raycast-target exists (nearly invisible Image)
-        var img = kanjiGraphic.GetComponent<Image>();
-        if (img == null)
+        // The graphic object is sometimes invisible/decorative-only, so also
+        // let the player click the character label itself.
+        if (kanjiTMP != null)
+            WireClickToAnimate(kanjiTMP.gameObject, ensureImage: false);
+    }
+
+    void WireClickToAnimate(GameObject target, bool ensureImage)
+    {
+        if (ensureImage)
         {
-            img = kanjiGraphic.gameObject.AddComponent<Image>();
-            img.color = new Color(1f, 1f, 1f, 0.01f);
+            var img = target.GetComponent<Image>();
+            if (img == null)
+            {
+                img = target.AddComponent<Image>();
+                img.color = new Color(1f, 1f, 1f, 0.01f);
+            }
+            img.raycastTarget = true;
         }
-        img.raycastTarget = true;
+        else
+        {
+            // TMP_Text already implements Graphic, so it has its own raycastTarget.
+            var graphic = target.GetComponent<Graphic>();
+            if (graphic != null) graphic.raycastTarget = true;
+        }
 
-        // Add EventTrigger → PointerClick → OnGraphicClicked
-        var trigger = kanjiGraphic.GetComponent<EventTrigger>();
+        var trigger = target.GetComponent<EventTrigger>();
         if (trigger == null)
-            trigger = kanjiGraphic.gameObject.AddComponent<EventTrigger>();
+            trigger = target.AddComponent<EventTrigger>();
 
         // Guard against duplicate entries (e.g. if Start() is called more than once)
         trigger.triggers.RemoveAll(e => e.eventID == EventTriggerType.PointerClick);
@@ -392,6 +402,36 @@ public class KanjiDisplayWithMeaning : MonoBehaviour
     ///   • a Dictionary map           → values joined with ", " (numeric keys)
     /// Returns null if the key is missing or the value is empty.
     /// </summary>
+    /// <summary>
+    /// Extracts a kanji's readings_kun / readings_on field as a cleaned list
+    /// of plain kana, e.g. "ひと.つ" or "ひと-" → "ひとつ" / "ひと". Used to
+    /// combine kun+on into one pronunciation list rather than only showing
+    /// whichever single field ReadFlexibleField happened to pick.
+    /// </summary>
+    List<string> ReadReadingList(Dictionary<string, object> data, string key)
+    {
+        var result = new List<string>();
+        if (!data.TryGetValue(key, out object raw) || raw == null) return result;
+
+        IEnumerable<string> rawItems = raw switch
+        {
+            List<object> list => list.Select(x => x?.ToString()),
+            Dictionary<string, object> map => Enumerable.Range(0, map.Count)
+                .Select(i => map.TryGetValue(i.ToString(), out object v) ? v?.ToString() : null),
+            _ => new[] { raw.ToString() }
+        };
+
+        foreach (var item in rawItems)
+        {
+            if (string.IsNullOrEmpty(item)) continue;
+            // "." separates stem from okurigana (e.g. "ひと.つ" spoken "ひとつ");
+            // "-" and "!" are edict/WaniKani boundary markers, not spoken sounds.
+            string cleaned = item.Trim('-', '!').Replace(".", "");
+            if (!string.IsNullOrEmpty(cleaned)) result.Add(cleaned);
+        }
+        return result;
+    }
+
     string ReadFlexibleField(Dictionary<string, object> data, params string[] keys)
     {
         foreach (var key in keys)

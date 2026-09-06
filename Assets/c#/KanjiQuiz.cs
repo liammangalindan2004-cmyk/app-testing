@@ -115,6 +115,8 @@ public class KanjiQuiz : MonoBehaviour
     public Color defaultColor = new Color(0.50f, 0.25f, 0.75f, 1f);
     public Color correctColor = new Color(0.18f, 0.72f, 0.42f, 1f);
     public Color wrongColor = new Color(0.85f, 0.22f, 0.22f, 1f);
+    [Tooltip("Color the target kanji is shown in within the question sentence.")]
+    public Color highlightColor = new Color(0.90f, 0.15f, 0.15f, 1f);
 
     // ── Realtime Database ─────────────────────────────────────────────────────
     [Header("Realtime Database Config")]
@@ -122,7 +124,9 @@ public class KanjiQuiz : MonoBehaviour
     [SerializeField] private string databaseUrl = "https://unmei-nihongo-center-default-rtdb.asia-southeast1.firebasedatabase.app/";
     [Tooltip("Key under kanji/ and srs/ — e.g. jlpt_n5, jlpt_n4, jlpt_n3, jlpt_n2.")]
     [SerializeField] private string jlptLevel = "jlpt_n5";
-    [SerializeField] private string userId = "student_001";  // replace with real auth UID
+    [Tooltip("Used ONLY if no student is logged in via StudentSession (e.g. opening this scene directly in the Editor without going through login). Normally userId comes from whoever is actually logged in, so grades land on the right account.")]
+    [SerializeField] private string debugUserIdOverride = "student_001";
+    private string userId => string.IsNullOrEmpty(StudentSession.CurrentUid) ? debugUserIdOverride : StudentSession.CurrentUid;
 
     // ── AI ────────────────────────────────────────────────────────────────────
     [Header("AI Config")]
@@ -187,6 +191,7 @@ public class KanjiQuiz : MonoBehaviour
     private string apiUrl;
 
     private Coroutine spinnerCoroutine;
+    private float _quizStartRealtime;
 
     // ═════════════════════════════════════════════════════════════════════════
     //  Unity Lifecycle
@@ -195,6 +200,7 @@ public class KanjiQuiz : MonoBehaviour
     void Start()
     {
         apiUrl = ngrokUrl.TrimEnd('/') + "/api/v1/chat";
+        _quizStartRealtime = Time.realtimeSinceStartup;
 
         choiceButtons = new[] { choiceButtonA, choiceButtonB, choiceButtonC, choiceButtonD };
         choiceLabels = new TextMeshProUGUI[]
@@ -276,7 +282,7 @@ public class KanjiQuiz : MonoBehaviour
             {
                 docId = child.Key,
                 character = child.Key,
-                meaning = ReadField(d, "meanings", "meaning") ?? "unknown"
+                meaning = ReadFirstMeaning(d, "meanings", "meaning") ?? "unknown"
             });
         }
 
@@ -333,7 +339,31 @@ public class KanjiQuiz : MonoBehaviour
         }
 
         BuildSessionQueue();
+
+        if (sessionQueue.Count == 0)
+        {
+            ShowNothingDueMessage();
+            yield break;
+        }
+
         yield return StartCoroutine(LoadAndShowQuestion());
+    }
+
+    /// <summary>Shown when every kanji's SRS review date is still in the future.</summary>
+    private void ShowNothingDueMessage()
+    {
+        StopSpinner();
+        if (questionTMP != null) questionTMP.text = "Nothing due for review right now! 🎉\nCheck back later.";
+        if (progressTMP != null) progressTMP.text = "0 of 0";
+        DisableChoiceButtons();
+        for (int i = 0; i < 4; i++) if (choiceLabels[i] != null) choiceLabels[i].text = "";
+        StartCoroutine(ExitAfterDelay(3f));
+    }
+
+    private IEnumerator ExitAfterDelay(float seconds)
+    {
+        yield return new WaitForSeconds(seconds);
+        SceneManager.LoadScene(exitSceneName);
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -342,7 +372,14 @@ public class KanjiQuiz : MonoBehaviour
 
     private void BuildSessionQueue()
     {
+        long nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+        // SRS gate: a kanji only enters this session if it's never been
+        // reviewed, or its nextReviewUnix has already passed. Anything
+        // scheduled for the future is left out entirely (not just
+        // deprioritized), so the player only ever sees what's actually due.
         sessionQueue = allKanji
+            .Where(k => !srsMap.ContainsKey(k.docId) || srsMap[k.docId].nextReviewUnix <= nowUnix)
             .OrderBy(k => srsMap.ContainsKey(k.docId)
                 ? srsMap[k.docId].nextReviewUnix
                 : long.MinValue)
@@ -350,7 +387,7 @@ public class KanjiQuiz : MonoBehaviour
 
         sessionIndex = 0;
         sessionCorrect = 0;
-        Debug.Log($"[Quiz] Queue built: {sessionQueue.Count} items.");
+        Debug.Log($"[Quiz] Queue built: {sessionQueue.Count} of {allKanji.Count} due for review.");
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -401,7 +438,7 @@ public class KanjiQuiz : MonoBehaviour
         StopSpinner();
 
         if (!string.IsNullOrWhiteSpace(aiQuestion))
-            questionTMP.text = aiQuestion.Trim();
+            questionTMP.text = HighlightBrackets(aiQuestion.Trim());
         else
         {
             Debug.LogWarning("[Quiz] AI timed out or returned empty — using fallback.");
@@ -509,8 +546,20 @@ public class KanjiQuiz : MonoBehaviour
     //  Fallback Question  (shown when AI times out or returns nothing)
     // ═════════════════════════════════════════════════════════════════════════
 
-    private static string FallbackQuestion(KanjiEntry e) =>
-        $"What does 「{e.character}」 mean in Japanese?";
+    private string FallbackQuestion(KanjiEntry e) =>
+        $"What does 「{HighlightBrackets("【" + e.character + "】")}」 mean in Japanese?";
+
+    /// <summary>
+    /// The AI is instructed to wrap the target word in 【】 brackets; this
+    /// swaps those brackets for an actual colored TMP rich-text span so the
+    /// kanji is visually highlighted in the sentence instead of just being
+    /// bracketed. Requires "Rich Text" enabled on questionTMP (TMP default).
+    /// </summary>
+    private string HighlightBrackets(string text)
+    {
+        string hex = ColorUtility.ToHtmlStringRGB(highlightColor);
+        return text.Replace("【", $"<color=#{hex}>").Replace("】", "</color>");
+    }
 
     // ═════════════════════════════════════════════════════════════════════════
     //  Spaced Repetition  (SM-2 variant)  →  srs/{userId}/{jlptLevel}/{docId}
@@ -606,6 +655,12 @@ public class KanjiQuiz : MonoBehaviour
                   if (t.IsFaulted)
                       Debug.LogWarning("[Grade] grades/reading write failed: " + t.Exception?.Message);
               });
+
+        // 3) Log this session to the activity calendar so it shows up on the
+        //    student's streak/calendar UI too, not just the reading grade.
+        int minutesStudied = Mathf.Max(1, Mathf.RoundToInt((Time.realtimeSinceStartup - _quizStartRealtime) / 60f));
+        ActivityCalendarWriter.LogActivity(dbRoot, userId, "reading",
+            kanjiDelta: total, minutesDelta: minutesStudied, countSession: true);
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -786,6 +841,54 @@ public class KanjiQuiz : MonoBehaviour
 
     private static long GetLong(Dictionary<string, object> d, string k, long def) =>
         d.ContainsKey(k) && long.TryParse(d[k]?.ToString(), out long v) ? v : def;
+
+    /// <summary>
+    /// Returns exactly ONE meaning for a kanji, instead of ReadField's
+    /// behavior of joining every synonym together (e.g. "Middle, Center,
+    /// In"). Each answer choice should read as a single definition, not a
+    /// comma-separated pile of them.
+    /// </summary>
+    private static string ReadFirstMeaning(Dictionary<string, object> data, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!data.ContainsKey(key) || data[key] == null) continue;
+            object raw = data[key];
+
+            if (raw is List<object> list)
+            {
+                foreach (var item in list)
+                {
+                    string s = item?.ToString()?.Trim();
+                    if (!string.IsNullOrEmpty(s)) return s;
+                }
+                continue;
+            }
+
+            if (raw is Dictionary<string, object> map)
+            {
+                for (int i = 0; i < map.Count; i++)
+                {
+                    if (map.TryGetValue(i.ToString(), out object v) && v != null)
+                    {
+                        string s = v.ToString().Trim();
+                        if (!string.IsNullOrEmpty(s)) return s;
+                    }
+                }
+                continue;
+            }
+
+            // Plain string — may itself be comma-separated (e.g. "Middle, In");
+            // take only the first segment.
+            string str = raw.ToString().Trim();
+            if (!string.IsNullOrEmpty(str))
+            {
+                int commaIdx = str.IndexOf(',');
+                return commaIdx >= 0 ? str.Substring(0, commaIdx).Trim() : str;
+            }
+        }
+        return null;
+    }
 }
 
 // ── JSON serialization helpers ────────────────────────────────────────────────

@@ -1,6 +1,5 @@
 using System;
 using Firebase;
-using Firebase.Auth;
 using Firebase.Database;
 using Firebase.Extensions;
 using TMPro;
@@ -16,7 +15,7 @@ public class AuthManager : MonoBehaviour
 
     [Header("Database")]
     // Your Realtime Database instance is hosted in asia-southeast1, so it needs
-    // to be addressed explicitly — Firebase.Auth won't route to it automatically.
+    // to be addressed explicitly.
     [SerializeField]
     private string databaseUrl = "https://unmei-nihongo-center-default-rtdb.asia-southeast1.firebasedatabase.app/";
 
@@ -24,48 +23,102 @@ public class AuthManager : MonoBehaviour
     public string studentLandingScene = "landing";
     public string adminDashboardScene = "admin_dashboard";
 
-    FirebaseAuth auth;
     DatabaseReference dbRoot;
 
     void Awake()
-    {
-        auth = FirebaseAuth.DefaultInstance;
-        dbRoot = FirebaseDatabase.GetInstance(FirebaseApp.DefaultInstance, databaseUrl).RootReference;
-    }
+{
+    FirebaseBootstrap.InitializationTask
+        .ContinueWithOnMainThread(task =>
+        {
+            if (task.Result == DependencyStatus.Available)
+            {
+                dbRoot = FirebaseDatabase.GetInstance(
+                    FirebaseApp.DefaultInstance,
+                    databaseUrl
+                ).RootReference;
+
+                Debug.Log("✅ AuthManager database ready.");
+            }
+            else
+            {
+                Debug.LogError(
+                    "❌ Firebase initialization failed: " + task.Result
+                );
+
+                if (statusText != null)
+                    statusText.text = "Firebase initialization failed.";
+            }
+        });
+}
 
     public void OnLoginButtonPressed()
+{
+    string email = emailInput.text.Trim();
+    string password = passwordInput.text;
+
+    // Check if fields are empty
+    if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
     {
-        string email = emailInput.text.Trim();
-        string password = passwordInput.text;
-
-        if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
-        {
-            statusText.text = "Email and password required";
-            return;
-        }
-
-        statusText.text = "Logging in...";
-
-        auth.SignInWithEmailAndPasswordAsync(email, password)
-            .ContinueWithOnMainThread(task =>
-            {
-                if (task.IsFaulted)
-                {
-                    ShowError(task.Exception);
-                    return;
-                }
-
-                FirebaseUser user = task.Result.User;
-                PostLoginChecks(user);
-            });
+        statusText.text = "Email and password required";
+        return;
     }
 
-    /// <summary>
-    /// After Firebase Auth succeeds, cross-check against users/{uid} in the
-    /// Realtime Database: is the account revoked, and what role/scene should
-    /// we route to. Also respects config/maintenanceMode for non-admins.
+    // Check if Firebase database is ready
+    if (dbRoot == null)
+    {
+        statusText.text = "Firebase is still initializing...";
+        Debug.LogWarning("⚠️ Login attempted before Firebase database was ready.");
+        return;
+    }
+
+    statusText.text = "Logging in...";
+
+    dbRoot.Child("users")
+        .OrderByChild("email")
+        .EqualTo(email)
+        .GetValueAsync()
+        .ContinueWithOnMainThread(task =>
+        {
+            if (task.IsFaulted)
+            {
+                ShowGenericError();
+                return;
+            }
+
+            if (!task.Result.Exists || task.Result.ChildrenCount == 0)
+            {
+                statusText.text = "Incorrect email or password";
+                return;
+            }
+
+            DataSnapshot snap = null;
+
+            foreach (DataSnapshot child in task.Result.Children)
+            {
+                snap = child;
+                break;
+            }
+
+            string uid = snap.Child("uid").Exists
+                ? snap.Child("uid").Value.ToString()
+                : snap.Key;
+
+            // Your existing UID-based password check
+            if (password != uid)
+            {
+                statusText.text = "Incorrect email or password";
+                return;
+            }
+
+            PostLoginChecks(snap, uid);
+        });
+}
+        /// <summary>
+    /// Once the email/password(uid) match is confirmed, check whether the
+    /// account is revoked and what role/scene to route to. Also respects
+    /// config/maintenanceMode for non-admins.
     /// </summary>
-    void PostLoginChecks(FirebaseUser user)
+    void PostLoginChecks(DataSnapshot snap, string uid)
     {
         dbRoot.Child("config").Child("maintenanceMode").GetValueAsync().ContinueWithOnMainThread(maintTask =>
         {
@@ -77,40 +130,32 @@ public class AuthManager : MonoBehaviour
 
             bool maintenanceMode = maintTask.Result.Exists && (bool)maintTask.Result.Value;
 
-            dbRoot.Child("users").Child(user.UserId).GetValueAsync().ContinueWithOnMainThread(userTask =>
+            bool isRevoked = snap.Child("isRevoked").Exists && (bool)snap.Child("isRevoked").Value;
+            string role = snap.Child("role").Exists ? snap.Child("role").Value.ToString() : "student";
+            string name = snap.Child("name").Exists ? snap.Child("name").Value.ToString() : uid;
+            string email = snap.Child("email").Exists ? snap.Child("email").Value.ToString() : "";
+
+            if (isRevoked)
             {
-                if (userTask.IsFaulted || !userTask.Result.Exists)
-                {
-                    // Auth succeeded but there's no matching users/{uid} record —
-                    // treat as invalid rather than letting them through.
-                    auth.SignOut();
-                    statusText.text = "Account not found. Please contact support.";
-                    return;
-                }
+                statusText.text = "This account has been revoked. Please contact support.";
+                return;
+            }
 
-                DataSnapshot snap = userTask.Result;
-                bool isRevoked = snap.Child("isRevoked").Exists && (bool)snap.Child("isRevoked").Value;
-                string role = snap.Child("role").Exists ? snap.Child("role").Value.ToString() : "student";
-                string name = snap.Child("name").Exists ? snap.Child("name").Value.ToString() : user.Email;
+            if (maintenanceMode && role != "admin")
+            {
+                statusText.text = "The system is under maintenance. Please try again later.";
+                return;
+            }
 
-                if (isRevoked)
-                {
-                    auth.SignOut();
-                    statusText.text = "This account has been revoked. Please contact support.";
-                    return;
-                }
+            statusText.text = "Welcome, " + name;
 
-                if (maintenanceMode && role != "admin")
-                {
-                    auth.SignOut();
-                    statusText.text = "The system is under maintenance. Please try again later.";
-                    return;
-                }
+            // Populate the shared session so every other scene (quiz, writing,
+            // pronunciation, dashboards) knows which student is logged in
+            // instead of each one hardcoding a uid.
+            StudentSession.SignIn(uid, email, name, role);
 
-                statusText.text = "Welcome, " + name;
-                TouchSession(user.UserId, role);
-                RouteToScene(role);
-            });
+            TouchSession(uid, role);
+            RouteToScene(role);
         });
     }
 
@@ -131,33 +176,6 @@ public class AuthManager : MonoBehaviour
     {
         string scene = role == "admin" ? adminDashboardScene : studentLandingScene;
         SceneManager.LoadSceneAsync(scene);
-    }
-
-    void ShowError(AggregateException ex)
-    {
-        FirebaseException fbEx =
-            ex.InnerExceptions[0] as FirebaseException;
-
-        if (fbEx == null)
-        {
-            ShowGenericError();
-            return;
-        }
-
-        AuthError code = (AuthError)fbEx.ErrorCode;
-
-        switch (code)
-        {
-            case AuthError.WrongPassword:
-                statusText.text = "Wrong password";
-                break;
-            case AuthError.UserNotFound:
-                statusText.text = "User not found";
-                break;
-            default:
-                ShowGenericError();
-                break;
-        }
     }
 
     void ShowGenericError()

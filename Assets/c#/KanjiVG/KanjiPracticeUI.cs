@@ -100,7 +100,9 @@ public class KanjiPracticeUI : MonoBehaviour
     [SerializeField] private string databaseUrl = "https://unmei-nihongo-center-default-rtdb.asia-southeast1.firebasedatabase.app/";
     [Tooltip("Key under kanji/ and srsWriting/ — e.g. jlpt_n5, jlpt_n4, jlpt_n3, jlpt_n2.")]
     [SerializeField] private string jlptLevel = "jlpt_n5";
-    [SerializeField] private string userId = "student_001";  // replace with real auth UID
+    [Tooltip("Used ONLY if no student is logged in via StudentSession (e.g. opening this scene directly in the Editor without going through login). Normally userId comes from whoever is actually logged in, so grades land on the right account.")]
+    [SerializeField] private string debugUserIdOverride = "student_001";
+    private string userId => string.IsNullOrEmpty(StudentSession.CurrentUid) ? debugUserIdOverride : StudentSession.CurrentUid;
     [Tooltip("If on, the practice character set is loaded from kanji/{jlptLevel} in the database, ordered by SRS priority — same source the reading quiz uses. If off, 'Practice List' above is used as typed.")]
     public bool useFirebaseKanjiList = true;
 
@@ -134,6 +136,7 @@ public class KanjiPracticeUI : MonoBehaviour
     private string[] _chars;
     private int _idx = 0;
     private bool _ready = false;
+    private bool _nothingDue = false;
     private KanjiStrokeGraphic _graphic;
 
     private DatabaseReference _dbRoot;
@@ -148,9 +151,15 @@ public class KanjiPracticeUI : MonoBehaviour
     private int _sessionCharsCompleted = 0;
     private float _sessionQualitySum = 0f;
 
+    // Activity calendar bookkeeping
+    private float _sessionStartRealtime;
+    private int _lastLoggedWholeMinutes = 0;
+
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     private void Start()
     {
+        _sessionStartRealtime = Time.realtimeSinceStartup;
+
         // Validate
         if (drawingBoard == null)
         {
@@ -201,7 +210,24 @@ public class KanjiPracticeUI : MonoBehaviour
             LoadCharsFromLocalString();
 
         _ready = true;
+
+        if (_nothingDue)
+        {
+            ShowNothingDueMessage();
+            yield break;
+        }
+
         LoadKanji(0);
+    }
+
+    /// <summary>Shown when every character's SRS review date is still in the future.</summary>
+    private void ShowNothingDueMessage()
+    {
+        if (characterLabel != null) { characterLabel.text = "🎉"; characterLabel.color = Color.white; }
+        SetFeedback("Nothing due for review right now!");
+        if (feedbackLabel != null) feedbackLabel.color = new Color(1f, 0.85f, 0.15f);
+        SetScore("—");
+        if (strokeProgressLabel != null) strokeProgressLabel.text = "";
     }
 
     // ── Character list loading ───────────────────────────────────────────────
@@ -237,6 +263,13 @@ public class KanjiPracticeUI : MonoBehaviour
         foreach (var child in kanjiSnap.Children)
             characters.Add(child.Key);
 
+        if (characters.Count == 0)
+        {
+            Debug.LogWarning("[Practice] kanji/" + jlptLevel + " was empty — falling back to local Practice List.");
+            LoadCharsFromLocalString();
+            yield break;
+        }
+
         // Load SRS so we can order overdue/unseen characters first, same as the reading quiz.
         bool srsDone = false;
         DataSnapshot srsSnap = null;
@@ -266,16 +299,26 @@ public class KanjiPracticeUI : MonoBehaviour
             }
         }
 
-        characters = characters
+        long nowUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+        // SRS gate: same rule as the reading quiz — a character only shows up
+        // if it's never been practiced, or its nextReviewUnix has already
+        // passed. Anything scheduled for the future is left out entirely.
+        var dueCharacters = characters
+            .Where(c => !_srsMap.ContainsKey(c) || _srsMap[c].nextReviewUnix <= nowUnix)
             .OrderBy(c => _srsMap.ContainsKey(c) ? _srsMap[c].nextReviewUnix : long.MinValue)
             .ToList();
 
-        if (characters.Count == 0)
+        Debug.Log($"[Practice] {dueCharacters.Count} of {characters.Count} characters due for review.");
+
+        if (dueCharacters.Count == 0)
         {
-            Debug.LogWarning("[Practice] kanji/" + jlptLevel + " was empty — falling back to local Practice List.");
-            LoadCharsFromLocalString();
+            _chars = Array.Empty<string>();
+            _nothingDue = true;
             yield break;
         }
+
+        characters = dueCharacters;
 
         _chars = characters.ToArray();
         Debug.Log($"[Practice] Loaded {_chars.Length} characters from kanji/{jlptLevel}.");
@@ -420,6 +463,16 @@ public class KanjiPracticeUI : MonoBehaviour
         // 3) Update SRS (kept separate from the reading quiz's `srs/` node so
         //    the two skills don't overwrite each other's mastery of the same kanji).
         UpdateSrsWriting(character, correct);
+
+        // 4) Log to the activity calendar. minutesStudied is an incremental
+        //    whole-minute delta since the last log, not the full session
+        //    elapsed time, so repeated per-character calls don't double-count.
+        int totalWholeMinutes = Mathf.FloorToInt((Time.realtimeSinceStartup - _sessionStartRealtime) / 60f);
+        int minutesDelta = Mathf.Max(0, totalWholeMinutes - _lastLoggedWholeMinutes);
+        _lastLoggedWholeMinutes = totalWholeMinutes;
+
+        ActivityCalendarWriter.LogActivity(_dbRoot, userId, "writing",
+            kanjiDelta: 1, minutesDelta: minutesDelta, countSession: _sessionCharsCompleted == 1);
     }
 
     private void UpdateSrsWriting(string character, bool correct)
