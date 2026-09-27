@@ -17,7 +17,7 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/KanjiWrite.unity
     guid: 095954e7ca923b14a8a06f7ca4406ac9
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/addClass.unity
     guid: bfafc0f71859c934a840ada42f599e4a
   - enabled: 1

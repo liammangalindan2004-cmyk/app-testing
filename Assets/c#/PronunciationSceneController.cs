@@ -67,11 +67,20 @@ public class PronunciationSceneController : MonoBehaviour
     [Header("Core")]
     public VoskPronunciationChecker checker;
 
+    [Header("Optional References")]
+    [Tooltip("Only needed if this scene is driven by a KanjiLessonManager. " +
+             "Used to look up the current item's English meaning, since " +
+             "KanjiLessonManager.SetLessonItem(...) doesn't pass it through. " +
+             "Leave empty if this scene only uses the Firebase SRS queue.")]
+    public KanjiLessonManager kanjiLessonManager;
+
     [Header("UI - Target")]
     [Tooltip("Shows the character/word the player should pronounce, e.g. 学生")]
     public TMP_Text targetCharacterText;
     [Tooltip("Optional: shows the reading in kana, e.g. がくせい")]
     public TMP_Text targetReadingText;
+    [Tooltip("Optional: shows the English meaning/definition of the current kanji, e.g. 'student'")]
+    public TMP_Text definitionText;
 
     [Header("UI - Mic Button")]
     public Button micButton;
@@ -97,6 +106,10 @@ public class PronunciationSceneController : MonoBehaviour
     [Tooltip("Populated automatically from the SRS-filtered session queue once it loads. You can still call SetLessonItem(...) to override manually — that bypasses the queue for that one attempt.")]
     public string currentCharacter = "";
     public string currentReadingKana = "";
+    [Tooltip("English meaning/definition of currentCharacter. Populated automatically — " +
+             "from KanjiLessonManager.lessonItems if assigned above, otherwise from the " +
+             "Firebase SRS queue's kanji record.")]
+    public string currentMeaningEnglish = "";
     public List<string> currentLessonVocabKana = new List<string>();
     [Tooltip("Seconds to show the result before auto-advancing to the next due item.")]
     [SerializeField] private float autoAdvanceDelay = 2f;
@@ -130,6 +143,7 @@ public class PronunciationSceneController : MonoBehaviour
     {
         public string character;
         public string reading;
+        public string meaning;
     }
 
     private bool _isBusy;
@@ -231,7 +245,9 @@ public class PronunciationSceneController : MonoBehaviour
                 string reading = ExtractPrimaryReading(d);
                 if (string.IsNullOrEmpty(reading)) continue; // skip kanji with no usable reading data
 
-                allEntries.Add(new PronunciationEntry { character = child.Key, reading = reading });
+                string meaning = ExtractMeaning(d);
+
+                allEntries.Add(new PronunciationEntry { character = child.Key, reading = reading, meaning = meaning });
             }
         }
 
@@ -312,6 +328,33 @@ public class PronunciationSceneController : MonoBehaviour
         return picked.Trim('-', '!').Replace(".", "");
     }
 
+    /// <summary>
+    /// Pulls the English meaning/definition out of a kanji/ record. Tries a few
+    /// common field name variants since the exact key used in your Firebase
+    /// schema wasn't visible from this file alone — adjust the list below if
+    /// your data uses a different key.
+    /// </summary>
+    private static string ExtractMeaning(Dictionary<string, object> kanjiData)
+    {
+        foreach (string key in new[] { "meaning", "meaning_en", "meaningEnglish", "definition", "meanings" })
+        {
+            if (!kanjiData.TryGetValue(key, out object raw) || raw == null) continue;
+
+            if (raw is List<object> list)
+            {
+                var parts = list.Select(o => o?.ToString()).Where(s => !string.IsNullOrEmpty(s));
+                string joined = string.Join(", ", parts);
+                if (!string.IsNullOrEmpty(joined)) return joined;
+            }
+            else
+            {
+                string s = raw.ToString();
+                if (!string.IsNullOrEmpty(s)) return s;
+            }
+        }
+        return "";
+    }
+
     private static string FirstReading(Dictionary<string, object> data, string key)
     {
         if (!data.TryGetValue(key, out object raw) || raw == null) return null;
@@ -331,6 +374,7 @@ public class PronunciationSceneController : MonoBehaviour
         var entry = _sessionQueue[_sessionIndex];
         currentCharacter = entry.character;
         currentReadingKana = entry.reading;
+        currentMeaningEnglish = entry.meaning ?? "";
 
         // Constrain Vosk's recognizer to this session's readings (plus the
         // current one) rather than open vocabulary — same "grammar" idea
@@ -347,6 +391,7 @@ public class PronunciationSceneController : MonoBehaviour
     {
         if (targetCharacterText != null) targetCharacterText.text = "🎉";
         if (targetReadingText != null) targetReadingText.text = message;
+        if (definitionText != null) definitionText.text = "";
         if (progressText != null) progressText.text = "";
         resultText.text = "";
         scoreText.text = "";
@@ -357,6 +402,7 @@ public class PronunciationSceneController : MonoBehaviour
     {
         if (targetCharacterText != null) targetCharacterText.text = "✓";
         if (targetReadingText != null) targetReadingText.text = "Session complete — nice work!";
+        if (definitionText != null) definitionText.text = "";
         if (progressText != null) progressText.text = $"{_sessionQueue.Count} of {_sessionQueue.Count}";
         micButton.interactable = false;
     }
@@ -411,15 +457,53 @@ public class PronunciationSceneController : MonoBehaviour
         currentCharacter = character;
         currentReadingKana = readingKana;
         currentLessonVocabKana = lessonVocabKana;
+        currentMeaningEnglish = LookUpMeaningFromLessonManager(character);
         RefreshTargetDisplay();
         resultText.text = "";
         scoreText.text = "";
+    }
+
+    /// <summary>
+    /// SetLessonItem's signature is fixed by KanjiLessonManager's call site and
+    /// doesn't carry the meaning through, so it's looked up here instead from
+    /// KanjiLessonManager's own (public) lessonItems list — this only reads
+    /// from KanjiLessonManager, it doesn't require any change to that file.
+    /// </summary>
+    private string LookUpMeaningFromLessonManager(string character)
+    {
+        if (kanjiLessonManager == null || kanjiLessonManager.lessonItems == null) return "";
+
+        foreach (var item in kanjiLessonManager.lessonItems)
+        {
+            if (item != null && item.kanji == character)
+                return item.meaningEnglish ?? "";
+        }
+        return "";
     }
 
     private void RefreshTargetDisplay()
     {
         if (targetCharacterText != null) targetCharacterText.text = currentCharacter;
         if (targetReadingText != null) targetReadingText.text = currentReadingKana;
+        if (definitionText != null) definitionText.text = LimitMeanings(currentMeaningEnglish, 3);
+    }
+
+    /// <summary>
+    /// Caps a meaning string to at most maxCount comma-separated entries, e.g.
+    /// "student, pupil, apprentice, trainee" with maxCount=3 becomes
+    /// "student, pupil, apprentice". Meanings that aren't comma-separated
+    /// (a single word/phrase) pass through unchanged.
+    /// </summary>
+    private static string LimitMeanings(string meaning, int maxCount)
+    {
+        if (string.IsNullOrEmpty(meaning)) return meaning;
+
+        var parts = meaning.Split(',')
+            .Select(s => s.Trim())
+            .Where(s => !string.IsNullOrEmpty(s))
+            .Take(maxCount);
+
+        return string.Join(", ", parts);
     }
 
     private void OnMicButtonDown()

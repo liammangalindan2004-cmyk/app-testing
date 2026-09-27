@@ -8,10 +8,10 @@ using UnityEngine.SceneManagement;
 public class NewMonoBehaviourScript : MonoBehaviour
 {
     public void gotoStudy(){
-        SceneManager.LoadSceneAsync(1);
+        SceneManager.LoadSceneAsync("definition");
     }
     public void gotoWrite(){
-        SceneManager.LoadSceneAsync(3);
+        SceneManager.LoadSceneAsync("KanjiWrite");
     }
     public void gotoLanding()
     {
@@ -19,10 +19,10 @@ public class NewMonoBehaviourScript : MonoBehaviour
     }
     public void gotoMultiChoices()
     {
-        SceneManager.LoadSceneAsync(5);
+        SceneManager.LoadSceneAsync(4);
     }
     public void gotoPronounce()
     {
-        SceneManager.LoadSceneAsync(6);
+        SceneManager.LoadSceneAsync(5);
     }
 }
