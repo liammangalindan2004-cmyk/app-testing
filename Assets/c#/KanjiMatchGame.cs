@@ -16,13 +16,17 @@ using UnityEngine.UI;
 /// keyed by kanji character, e.g.
 ///   "一": { "meanings": ["One", ...], "readings_on": ["いち","いつ"], "readings_kun": ["ひと-", ...] }
 ///
-/// For the selected JLPT level, every kanji in that level is queued up
-/// into rounds of 3. Each word contributes 3 tiles to the board: its
+/// For the selected JLPT level, every kanji is shuffled into one queue.
+/// Each word contributes 2 tiles to the board, randomly chosen from its
 /// kanji, its meaning, and its reading (no label says which is which).
-/// Tapping any two tiles that belong to the same word clears all three
-/// of that word's tiles. Once a round is cleared, "Next" advances to
-/// the next 3 kanji; once every kanji in the level has appeared, the
-/// game reports the level complete and can restart with a fresh shuffle.
+/// With 9 tiles there are always 4 complete pairs plus one "lone" tile
+/// whose partner isn't on the board yet. As soon as any pair is matched,
+/// the lone tile's partner appears in one of the freed slots and the other
+/// freed slot starts a new lone tile from the next kanji in the queue.
+/// Once the queue runs out, freed slots are filled with distractors:
+/// tiles taken from kanji that aren't on the board, which can never be
+/// matched, so the board never has empty tiles. The level is complete when
+/// every pair has been matched.
 ///
 /// SETUP
 /// 1. Package Manager > Add package by name > com.unity.nuget.newtonsoft-json
@@ -61,8 +65,9 @@ public class KanjiMatchGame : MonoBehaviour
 
     private class TileData
     {
-        public int wordIndex;
+        public int wordIndex;   // >= 0 for real words, < 0 for distractors (never matches)
         public string label;
+        public KanjiWord word;
     }
 
     public enum JlptLevel { N5, N4, N3, N2 }
@@ -75,7 +80,7 @@ public class KanjiMatchGame : MonoBehaviour
     [Range(1, 3)] public int meaningsPerTile = 1;
     [Range(1, 3)] public int readingsPerTile = 2;
 
-    [Header("Board — assign exactly 9 tiles")]
+    [Header("Board — assign 9 tiles")]
     public TileView[] tiles = new TileView[9];
 
     [Header("UI")]
@@ -90,21 +95,22 @@ public class KanjiMatchGame : MonoBehaviour
     public float wrongResetDelay = 0.5f;
 
     private List<KanjiWord> allWords = new List<KanjiWord>();
-    private List<List<KanjiWord>> rounds = new List<List<KanjiWord>>();
-    private int roundIndex = -1;
+    private List<KanjiWord> queue = new List<KanjiWord>();
+    private int nextQueueIndex;
+    private int pairsMatched;
+    private TileData pendingPartner;   // partner of the lone tile on the board
+    private int distractorCounter;
 
-    private readonly List<KanjiWord> roundWords = new List<KanjiWord>();
     private TileData[] boardData = new TileData[9];
-    private readonly HashSet<int> matchedWordIndices = new HashSet<int>();
     private readonly List<int> selectedTileIndices = new List<int>();
     private int moves;
     private bool locked;
 
     private void Start()
     {
-        if (tiles.Length != 9)
+        if (tiles.Length < 2)
         {
-            Debug.LogError($"KanjiMatchGame requires exactly 9 tiles — found {tiles.Length}. Fix the size of the Tiles array in the Inspector.");
+            Debug.LogError($"KanjiMatchGame requires at least 2 tiles — found {tiles.Length}. Fix the size of the Tiles array in the Inspector.");
             return;
         }
 
@@ -118,7 +124,7 @@ public class KanjiMatchGame : MonoBehaviour
         }
 
         if (nextRoundButton != null)
-            nextRoundButton.onClick.AddListener(OnNextRoundPressed);
+            nextRoundButton.onClick.AddListener(OnRestartPressed);
 
         LoadLevel(level);
     }
@@ -216,9 +222,7 @@ public class KanjiMatchGame : MonoBehaviour
             }
 
             allWords = parsed;
-            BuildRounds();
-            roundIndex = -1;
-            AdvanceRound();
+            StartGame();
         }
     }
 
@@ -251,121 +255,138 @@ public class KanjiMatchGame : MonoBehaviour
         return result;
     }
 
-    private void BuildRounds()
+    private void OnRestartPressed()
     {
-        List<KanjiWord> shuffled = new List<KanjiWord>(allWords);
-        Shuffle(shuffled);
-
-        rounds = new List<List<KanjiWord>>();
-        int i = 0;
-        while (i < shuffled.Count)
-        {
-            int remaining = shuffled.Count - i;
-            if (remaining >= 3)
-            {
-                rounds.Add(shuffled.GetRange(i, 3));
-                i += 3;
-            }
-            else
-            {
-                // Pad a short final round with already-seen words so the
-                // board always has exactly 3 words / 9 tiles. Every kanji
-                // still appears at least once across the level.
-                List<KanjiWord> last = new List<KanjiWord>(shuffled.GetRange(i, remaining));
-                int padNeeded = 3 - remaining;
-                for (int p = 0; p < padNeeded && p < shuffled.Count; p++)
-                    last.Add(shuffled[p]);
-                rounds.Add(last);
-                i = shuffled.Count;
-            }
-        }
+        StartGame();
     }
 
-    private void AdvanceRound()
+    private void StartGame()
     {
-        roundIndex++;
-
-        if (roundIndex >= rounds.Count)
-        {
-            SetStatus($"Level complete! You covered all {allWords.Count} kanji in {LevelKey(level)}.");
-            if (progressText != null) progressText.text = $"{allWords.Count} / {allWords.Count} kanji";
-            SetTilesInteractable(false);
-            locked = true;
-
-            if (nextRoundButton != null)
-            {
-                nextRoundButton.gameObject.SetActive(true);
-                var label = nextRoundButton.GetComponentInChildren<TextMeshProUGUI>();
-                if (label != null) label.text = "Restart Level";
-            }
-            return;
-        }
-
-        StartRound(rounds[roundIndex]);
-    }
-
-    private void OnNextRoundPressed()
-    {
-        if (roundIndex >= rounds.Count)
-        {
-            // Level was complete — restart from the top with a fresh shuffle.
-            BuildRounds();
-            roundIndex = -1;
-        }
-        AdvanceRound();
-    }
-
-    private void StartRound(List<KanjiWord> words)
-    {
+        queue = new List<KanjiWord>(allWords);
+        Shuffle(queue);
+        nextQueueIndex = 0;
+        pairsMatched = 0;
         moves = 0;
+        distractorCounter = 0;
+        pendingPartner = null;
         selectedTileIndices.Clear();
-        matchedWordIndices.Clear();
         locked = false;
 
-        roundWords.Clear();
-        roundWords.AddRange(words);
-        boardData = BuildBoard(roundWords);
+        if (nextRoundButton != null) nextRoundButton.gameObject.SetActive(false);
 
         for (int i = 0; i < tiles.Length; i++)
-            RenderTile(i);
+            tiles[i].button.gameObject.SetActive(true);
 
-        if (nextRoundButton != null)
-        {
-            nextRoundButton.gameObject.SetActive(false);
-            var label = nextRoundButton.GetComponentInChildren<TextMeshProUGUI>();
-            if (label != null) label.text = "Next";
-        }
+        boardData = new TileData[tiles.Length];
+        FillSlots(Enumerable.Range(0, tiles.Length).ToList());
 
-        SetTilesInteractable(true);
         UpdateStatus();
         UpdateProgress();
     }
 
-    private TileData[] BuildBoard(List<KanjiWord> words)
+    /// <summary>
+    /// Fills the given empty tile slots. Order of priority:
+    /// 1) the pending partner of the current lone tile,
+    /// 2) new words from the queue (2 tiles each; if only one slot is left,
+    ///    that word becomes the new lone tile and its partner is held back),
+    /// 3) distractors once the queue is empty.
+    /// </summary>
+    private void FillSlots(List<int> slots)
     {
-        List<TileData> data = new List<TileData>(9);
-        for (int w = 0; w < words.Count; w++)
+        Shuffle(slots);
+        int i = 0;
+
+        if (pendingPartner != null && slots.Count > 0)
         {
-            data.Add(new TileData { wordIndex = w, label = words[w].kanji });
-            data.Add(new TileData { wordIndex = w, label = words[w].meaning });
-            data.Add(new TileData { wordIndex = w, label = words[w].reading });
+            PlaceTile(slots[i++], pendingPartner);
+            pendingPartner = null;
         }
-        Shuffle(data);
-        return data.ToArray();
+
+        while (i < slots.Count)
+        {
+            int remaining = slots.Count - i;
+
+            if (nextQueueIndex < queue.Count)
+            {
+                int id = nextQueueIndex;
+                KanjiWord word = queue[nextQueueIndex++];
+
+                List<TileData> forms = new List<TileData>
+                {
+                    new TileData { wordIndex = id, label = word.kanji, word = word },
+                    new TileData { wordIndex = id, label = word.meaning, word = word },
+                    new TileData { wordIndex = id, label = word.reading, word = word }
+                };
+                Shuffle(forms); // first 2 are the chosen pair
+
+                PlaceTile(slots[i++], forms[0]);
+                if (remaining >= 2)
+                    PlaceTile(slots[i++], forms[1]);
+                else
+                    pendingPartner = forms[1]; // lone tile: partner arrives after the next match
+            }
+            else
+            {
+                PlaceDistractor(slots[i++]);
+            }
+        }
     }
 
-    private void RenderTile(int i)
+    /// <summary>
+    /// Fills a slot with a tile from a kanji that is NOT on the board (and
+    /// isn't waiting as a pending partner), using a label that doesn't
+    /// already appear on the board. It gets a unique negative id, so it can
+    /// never match anything.
+    /// </summary>
+    private void PlaceDistractor(int slot)
     {
-        TileData d = boardData[i];
-        tiles[i].label.text = d.label;
-        tiles[i].button.interactable = true;
+        HashSet<KanjiWord> onBoard = new HashSet<KanjiWord>();
+        HashSet<string> labelsOnBoard = new HashSet<string>();
+        foreach (TileData t in boardData)
+        {
+            if (t == null) continue;
+            if (t.word != null) onBoard.Add(t.word);
+            labelsOnBoard.Add(t.label);
+        }
+        if (pendingPartner != null && pendingPartner.word != null)
+            onBoard.Add(pendingPartner.word);
+
+        List<TileData> candidates = new List<TileData>();
+        foreach (KanjiWord w in allWords)
+        {
+            if (onBoard.Contains(w)) continue;
+            foreach (string label in new[] { w.kanji, w.meaning, w.reading })
+            {
+                if (!labelsOnBoard.Contains(label))
+                    candidates.Add(new TileData { label = label, word = w });
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            Debug.LogWarning("KanjiMatchGame: not enough kanji in this level to make a distractor; leaving a tile blank.");
+            boardData[slot] = null;
+            tiles[slot].label.text = "";
+            tiles[slot].button.interactable = false;
+            return;
+        }
+
+        TileData chosen = candidates[UnityEngine.Random.Range(0, candidates.Count)];
+        chosen.wordIndex = --distractorCounter; // unique negative id: never pairs
+        PlaceTile(slot, chosen);
+    }
+
+    private void PlaceTile(int slot, TileData data)
+    {
+        boardData[slot] = data;
+        tiles[slot].label.text = data.label;
+        tiles[slot].button.interactable = true;
     }
 
     private void OnTileClicked(int idx)
     {
         if (locked) return;
         if (boardData[idx] == null) return;
-        if (matchedWordIndices.Contains(boardData[idx].wordIndex)) return;
         if (selectedTileIndices.Contains(idx)) return;
         if (selectedTileIndices.Count >= 2) return;
 
@@ -391,18 +412,36 @@ public class KanjiMatchGame : MonoBehaviour
     {
         yield return new WaitForSeconds(matchDelay);
 
-        matchedWordIndices.Add(wordIndex);
+        pairsMatched++;
 
+        // Free the matched pair's tiles.
+        List<int> freed = new List<int>();
         for (int i = 0; i < boardData.Length; i++)
         {
-            if (boardData[i].wordIndex == wordIndex)
+            if (boardData[i] != null && boardData[i].wordIndex == wordIndex)
+            {
+                freed.Add(i);
+                boardData[i] = null;
                 tiles[i].button.interactable = false;
+            }
         }
 
         selectedTileIndices.Clear();
+
+        if (PairsLeft == 0)
+        {
+            UpdateStatus();
+            UpdateProgress();
+            CompleteLevel();
+            yield break;
+        }
+
+        // Lone tile's partner appears here; leftover slot gets a new lone tile or a distractor.
+        FillSlots(freed);
+
         locked = false;
         UpdateStatus();
-        CheckRoundWin();
+        UpdateProgress();
     }
 
     private IEnumerator HandleMismatch(int a, int b)
@@ -413,17 +452,19 @@ public class KanjiMatchGame : MonoBehaviour
         locked = false;
     }
 
-    private void CheckRoundWin()
-    {
-        if (matchedWordIndices.Count != roundWords.Count) return;
+    private int PairsLeft => queue.Count - pairsMatched;
 
+    private void CompleteLevel()
+    {
         locked = true;
+        SetTilesInteractable(false);
+        SetStatus($"Level complete! You matched all {queue.Count} pairs in {moves} moves.");
 
         if (nextRoundButton != null)
         {
             nextRoundButton.gameObject.SetActive(true);
             var label = nextRoundButton.GetComponentInChildren<TextMeshProUGUI>();
-            if (label != null) label.text = (roundIndex + 1 >= rounds.Count) ? "Finish Level" : "Next";
+            if (label != null) label.text = "Restart Level";
         }
     }
 
@@ -432,18 +473,15 @@ public class KanjiMatchGame : MonoBehaviour
         if (movesText != null)
             movesText.text = $"{moves} moves";
 
-        if (statusText == null) return;
+        if (statusText == null || PairsLeft == 0) return;
 
-        bool wonRound = matchedWordIndices.Count == roundWords.Count;
-        statusText.text = wonRound
-            ? $"Round cleared in {moves} moves!"
-            : $"{matchedWordIndices.Count} / {roundWords.Count} words matched";
+        statusText.text = PairsLeft == 1 ? "1 pair left" : $"{PairsLeft} pairs left";
     }
 
     private void UpdateProgress()
     {
         if (progressText == null) return;
-        progressText.text = $"Round {roundIndex + 1} / {rounds.Count} · {allWords.Count} kanji in {LevelKey(level)}";
+        progressText.text = $"{pairsMatched} / {queue.Count} matched · {LevelKey(level)}";
     }
 
     private void SetStatus(string message)
