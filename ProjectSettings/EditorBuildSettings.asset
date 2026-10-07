@@ -26,6 +26,9 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Scenes/KanjiPronounce.unity
     guid: bdc16cb6503f8e6469f03a41a4dfb321
+  - enabled: 1
+    path: Assets/Scenes/game.unity
+    guid: 25d4b31f828a3464189ce0746ee8046e
   m_configObjects:
     com.unity.addressableassets: {fileID: 11400000, guid: e5c6fedc82442ea4cbeedfeea77290c6, type: 2}
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 2bcd2660ca9b64942af0de543d8d7100, type: 3}

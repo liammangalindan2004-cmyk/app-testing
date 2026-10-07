@@ -481,7 +481,7 @@ public class KanjiMatchGame : MonoBehaviour
     private void UpdateProgress()
     {
         if (progressText == null) return;
-        progressText.text = $"{pairsMatched} / {queue.Count} matched · {LevelKey(level)}";
+        progressText.text = $"{pairsMatched} / {queue.Count} matched";
     }
 
     private void SetStatus(string message)

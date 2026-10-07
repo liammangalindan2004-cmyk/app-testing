@@ -25,4 +25,8 @@ public class NewMonoBehaviourScript : MonoBehaviour
     {
         SceneManager.LoadSceneAsync(5);
     }
+    public void gotoGame()
+    {
+        SceneManager.LoadSceneAsync("game");
+    }
 }
